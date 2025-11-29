@@ -101,7 +101,9 @@ def load_config(config_path: str) -> Dict[str, Any]:
     """
     with open(config_path, 'r') as f:
         config = yaml.safe_load(f)
-    config['agent'] = load_agent_config(config['agent_type'])
+    # Only load agent config if not already present in the YAML file
+    if 'agent' not in config or not config['agent']:
+        config['agent'] = load_agent_config(config['agent_type'])
     return config
 
 
@@ -115,25 +117,50 @@ def load_agent_config(agent_type: str) -> Dict[str, Any]:
     Returns:
         Agent configuration dictionary
     """
+    # Try both relative paths (for when called from mle-dojo) and absolute paths (for when called from root)
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    base_dir = os.path.dirname(script_dir)  # Go up from mledojo/ to the package root
+    
     config_paths = {
-        'aide': './mledojo/agent/aide/utils/config.yaml',
-        'mle': './mledojo/agent/mleagent/config.yaml',
-        'openai': './mledojo/agent/openaiagent/config.yaml',
-        'dummy': './mledojo/agent/dummy/config.yaml'
+        'aide': [
+            './mledojo/agent/aide/utils/config.yaml',
+            os.path.join(base_dir, 'agent/aide/utils/config.yaml'),
+            './submodules/mle-dojo/mledojo/agent/aide/utils/config.yaml'
+        ],
+        'mle': [
+            './mledojo/agent/mleagent/config.yaml',
+            os.path.join(base_dir, 'agent/mleagent/config.yaml'),
+            './submodules/mle-dojo/mledojo/agent/mleagent/config.yaml'
+        ],
+        'openai': [
+            './mledojo/agent/openaiagent/config.yaml',
+            os.path.join(base_dir, 'agent/openaiagent/config.yaml'),
+            './submodules/mle-dojo/mledojo/agent/openaiagent/config.yaml'
+        ],
+        'dummy': [
+            './mledojo/agent/dummy/config.yaml',
+            os.path.join(base_dir, 'agent/dummy/config.yaml'),
+            './submodules/mle-dojo/mledojo/agent/dummy/config.yaml'
+        ]
     }
     
     if agent_type not in config_paths:
         raise ValueError(f"Unknown agent type: {agent_type}. Must be one of: {', '.join(config_paths.keys())}")
     
-    config_path = config_paths[agent_type]
+    paths_to_try = config_paths[agent_type]
     
-    try:
-        with open(config_path, 'r') as f:
-            agent_config = yaml.safe_load(f)
-            return agent_config.get('agent', {})
-    except FileNotFoundError:
-        rprint(f"[bold red]Warning:[/bold red] Agent config file not found at {config_path}. Using empty config.")
-        return {}
+    for config_path in paths_to_try:
+        if os.path.exists(config_path):
+            try:
+                with open(config_path, 'r') as f:
+                    agent_config = yaml.safe_load(f)
+                    return agent_config.get('agent', {})
+            except Exception as e:
+                Console().print(f"[bold yellow]Warning:[/bold yellow] Error loading config from {config_path}: {e}")
+                continue
+    
+    Console().print(f"[bold red]Warning:[/bold red] Agent config file not found for {agent_type}. Using empty config.")
+    return {}
 
 
 def create_config_from_args(args: Any) -> Dict[str, Any]:
