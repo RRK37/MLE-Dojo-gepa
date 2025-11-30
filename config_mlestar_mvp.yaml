@@ -1,6 +1,17 @@
+# ============================================================================
 # MLE-STAR MVP Configuration
+# ============================================================================
 # Minimal but complete workflow: Search → Foundation → Refinement → Ensemble → Validation
 # Based on PaperMethod.md MVP specification
+#
+# Workflow Overview:
+#   1. Algorithm 1: Web Search → Retrieve M models → Generate solutions → Sequential merge
+#   2. Algorithm 2: Ablation study → Extract code block → Refine (2 outer loops, 1 inner step)
+#   3. Algorithm 3: Simple ensemble (baseline + refined solution)
+#   4. Validation: Automatic debug on failure + leakage/usage checks
+#
+# Expected Runtime: 1-2 hours (MVP)
+# ============================================================================
 
 # Output directory for agent results and logs
 output_dir: "output/"
@@ -9,58 +20,141 @@ output_dir: "output/"
 competition:
   name: "spooky-author-identification"
   data_dir: "data/prepared"
+  # Note: Data will be copied to workspace_dir/input/ automatically
 
 # Environment settings
 env:
-  render_mode: "human"
-  gpu_device: 0
-  gpu_memory_limit: 32
-  execution_timeout: 10000  # seconds
-  score_mode: "position"
+  render_mode: "human"  # Options: human, json
+  gpu_device: 0  # GPU device index (0 = first GPU)
+  gpu_memory_limit: 32  # GB
+  execution_timeout: 10000  # seconds (2.7 hours)
+  score_mode: "position"  # Position score (leaderboard rank)
   max_steps: 15  # MVP: Fewer steps, focused workflow
+  # Steps breakdown:
+  #   - Algorithm 1: ~3-5 steps (search + merge)
+  #   - Algorithm 2: ~4-6 steps (refinement)
+  #   - Algorithm 3: ~2-3 steps (ensemble)
+  #   - Validation: ~1 step
 
 # Agent Type
 agent_type: "mlestar"
 
 # Agent configuration (AIDE-style for workspace management)
 agent:
+  # ========================================================================
   # LLM Configuration
-  model_mode: "claude"  # Options: claude, openai, gemini
+  # ========================================================================
+  model_mode: "claude"  # Options: claude, openai, gemini, gpt
   model_name: "claude-opus-4-5"  # Latest Claude Opus 4.5 (released Nov 24, 2025) - best for MLE-STAR
-  max_completion_tokens: 8192
-  max_prompt_tokens: 30000
-  api_idx: 0
-  api_key: ""  # Set via ANTHROPIC_API_KEY environment variable
+  # Alternative models:
+  #   - "gpt-4o-mini" (faster, cheaper)
+  #   - "gpt-4o" (better quality)
+  #   - "gemini-2.0-flash" (fast, good quality)
   
-  # AIDE-style config
+  max_completion_tokens: 8192  # Max tokens for code generation
+  max_prompt_tokens: 30000  # Max tokens for prompts
+  api_idx: 0  # API key index (for multiple keys)
+  api_key: ""  # Set via ANTHROPIC_API_KEY environment variable (REQUIRED)
+  temperature: 0.0  # Deterministic code generation
+  top_p: 1.0
+  
+  # ========================================================================
+  # AIDE-style workspace configuration
+  # ========================================================================
   steps: 15  # MVP: Reduced steps for faster completion
-  data_preview: true
-  expose_prediction: false
-  k_fold_validation: 1
+  data_preview: true  # Show data preview to LLM (recommended)
+  expose_prediction: false  # Don't expose prediction function (MVP)
+  k_fold_validation: 1  # No cross-validation (MVP: faster)
 
+# ============================================================================
 # MLE-STAR MVP Configuration
+# ============================================================================
 # Following PaperMethod.md MVP specification:
-# 1. Web Search: 1-3 iterations (using 3)
-# 2. Merging: Sequential merge from Algorithm 1
-# 3. Refinement: 2 outer loops, skip inner loop (K=1)
-# 4. Ensemble: Simple ensemble (baseline + refined), not iterative
-# 5. Validation: Basic debugging + lightweight leakage/usage checks
+#   1. Web Search: 3 iterations (retrieve 3 models)
+#   2. Merging: Sequential merge from Algorithm 1 (until no improvement)
+#   3. Refinement: 2 outer loops, 1 inner step (skip full inner loop)
+#   4. Ensemble: Simple ensemble (baseline + refined), not iterative planning
+#   5. Validation: Automatic debug on failure + lightweight leakage/usage checks
+# ============================================================================
 mlestar:
-  # Search Phase (MVP: 3 iterations as recommended)
-  search_iterations: 3
-  num_models_to_retrieve: 3
+  # ========================================================================
+  # Algorithm 1: Initial Solution (Search → Merge)
+  # ========================================================================
+  # Search Phase: Web search for effective models
+  search_iterations: 3  # MVP: 3 iterations as recommended in paper
+  num_models_to_retrieve: 3  # Retrieve 3 models per search (M in Algorithm 1)
+  # Process:
+  #   - A_retriever: Web search (Perplexity API) → {T_model_i, T_code_i}
+  #   - A_init: Generate solution for each model → Evaluate h(s_init_i)
+  #   - A_merger: Sequential merge until no improvement
   
-  # Refinement Phase (MVP: 2 outer loops, skip inner loop)
-  refinement_iterations: 2  # One or two outer loops (MVP recommendation)
-  inner_refinement_steps: 1  # MVP: Skip inner loop, just one refinement per outer loop
+  # ========================================================================
+  # Algorithm 2: Targeted Refinement (Ablation → Refine)
+  # ========================================================================
+  # Refinement Phase: Targeted optimization of high-impact components
+  refinement_iterations: 2  # MVP: 2 outer loops (T in Algorithm 2)
+  inner_refinement_steps: 1  # MVP: 1 inner step (K=1, skip full inner loop)
+  # Process:
+  #   - A_abl: Generate ablation study → Execute → Summarize
+  #   - A_extractor: Extract code block with highest impact
+  #   - A_coder: Refine code block (1 attempt per outer loop)
+  #   - Evaluate and update best solution
   
-  # Ensemble Phase (MVP: Simple ensemble, not iterative)
+  # ========================================================================
+  # Algorithm 3: Ensemble
+  # ========================================================================
+  # Ensemble Phase: Combine solutions
   ensemble_iterations: 1  # MVP: Simple ensemble, not iterative planning
+  # Process:
+  #   - A_ens_planner: Generate ensemble plan (simple averaging/stacking)
+  #   - A_ensembler: Implement ensemble
+  #   - Evaluate and select best
   
-  # Data handling
-  subsample_size: 30000
+  # ========================================================================
+  # Data Handling
+  # ========================================================================
+  subsample_size: 30000  # Subsample if >30k samples (per paper)
+  
+  # ========================================================================
+  # Debugging Configuration
+  # ========================================================================
+  max_debug_attempts: 2  # Max debug attempts per execution failure (per paper Section 3.4)
+  # Automatic debug on failure:
+  #   - When execution fails → A_debugger called automatically
+  #   - Iterative: s ← A_debugger(s, T_bug) until success or max attempts
+  #   - Uses journal context (parent nodes, feedback, task_desc, data_preview)
 
-# API Keys (should be set as environment variables)
-# - PERPLEXITY_API_KEY (for web search)
-# - ANTHROPIC_API_KEY (for Claude LLM - REQUIRED)
+# ============================================================================
+# API Keys (REQUIRED - set as environment variables)
+# ============================================================================
+# PERPLEXITY_API_KEY: Required for web search (A_retriever)
+#   - Get from: https://www.perplexity.ai/
+#   - Used for: Model retrieval via web search
+#
+# ANTHROPIC_API_KEY: Required for Claude LLM (code generation)
+#   - Get from: https://console.anthropic.com/
+#   - Used for: All LLM agents (A_init, A_coder, A_planner, etc.)
+#
+# Optional (if using OpenAI):
+# OPENAI_API_KEY: For GPT models
+#   - Get from: https://platform.openai.com/
+#
+# Optional (if using Google):
+# GOOGLE_API_KEY: For Gemini models
+#   - Get from: https://aistudio.google.com/
+# ============================================================================
+
+# ============================================================================
+# Available Packages (from requirements.txt)
+# ============================================================================
+# The agent automatically reads requirements.txt and informs the LLM about
+# available packages. Key packages include:
+#   - ML: numpy, pandas, scikit-learn, xgboost, lightgbm, catboost
+#   - Deep Learning: torch, torchvision, transformers, timm
+#   - NLP: nltk, spacy, sentencepiece, tokenizers
+#   - CV: opencv-python, albumentations, scikit-image
+#   - Audio: librosa, soundfile, speechbrain
+#   - Visualization: matplotlib, seaborn, plotly
+#   - And many more (see requirements.txt)
+# ============================================================================
 

@@ -27,7 +27,7 @@ Model = {{'model_name': str, 'example_code': str}}
 Return: list[Model]"""
 
     @staticmethod
-    def prompt_2_initial_solution(task_description: str, model_description: str, example_code: str, data_dir: str) -> str:
+    def prompt_2_initial_solution(task_description: str, model_description: str, example_code: str, data_dir: str, available_packages: str = "") -> str:
         """Prompt 2: Generate initial solution from model."""
         return f"""# Introduction
 - You are a Kaggle grandmaster attending a competition.
@@ -51,7 +51,7 @@ Return: list[Model]"""
 - Propose an evaluation metric that is reasonable for this task.
 - All the provided data is already prepared and available in the `{data_dir}` directory. There is no need to unzip any files.
 - Do not include other models that are not directly related to the model described.
-- Use PyTorch rather than TensorFlow. Use CUDA if you need. All the necessary libraries are installed.
+- {available_packages}
 - The code should implement the proposed solution and print the value of the evaluation metric computed on a hold-out validation set.
 - Only use the provided train data in the `{data_dir}` directory. Do not load test data.
 - If there are more than 30,000 training samples, you must subsample to 30,000 for a faster run.
@@ -65,7 +65,7 @@ Return: list[Model]"""
 - Do not use try: and except: or if else to ignore unintended behavior."""
 
     @staticmethod
-    def prompt_3_merge_solutions(task_description: str, base_code: str, reference_code: str, data_dir: str) -> str:
+    def prompt_3_merge_solutions(task_description: str, base_code: str, reference_code: str, data_dir: str, available_packages: str = "") -> str:
         """Prompt 3: Merge base and reference solutions."""
         return f"""# Introduction
 - You are a Kaggle grandmaster attending a competition.
@@ -86,6 +86,7 @@ Return: list[Model]"""
 - When integrating, try to keep code with similar functionality in the same place (e.g., all preprocessing should be done and then all training).
 - When integrating, ensemble the models.
 - The solution design should be relatively simple.
+- {available_packages}
 - The code should implement the proposed solution and print the value of the evaluation metric computed on a hold-out validation set.
 - Only use the provided train data in the `{data_dir}` directory. Do not load test data.
 - If there are more than 30,000 training samples, you must subsample to 30,000 for a faster run.
@@ -273,6 +274,7 @@ Return: list[Refine_Plan]"""
 # Your task
 - Implement the ensemble plan with the provided solutions.
 - Unless mentioned in the ensemble plan, do not modify the original Python Solutions too much."
+- {available_packages}
 - All the provided data (except previous submissions; do not load submissions) is already prepared and available in the `{data_dir}` directory. There is no need to unzip any files.
 - The code should implement the proposed solution and print the value of the evaluation metric computed on a hold-out validation set.
 

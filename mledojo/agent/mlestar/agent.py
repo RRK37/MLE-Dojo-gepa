@@ -256,9 +256,9 @@ class MLEStarAgent:
             logger.info(f"Generating solution {i+1}/{len(self.retrieved_models)}")
             code = self._generate_initial_solution_from_model(model)
             if code:
-                result = exec_callback(code)
+                result, final_code, _ = self._execute_with_debug(code, exec_callback)
                 score = self._extract_score(result)
-                self.initial_solutions.append((code, score))
+                self.initial_solutions.append((final_code, score))
                 logger.info(f"Solution {i+1} score: {score}")
         
         if not self.initial_solutions:
@@ -280,13 +280,13 @@ class MLEStarAgent:
                 logger.info(f"Failed to merge solution {i+1}, skipping")
                 continue
             
-            result = exec_callback(merged_code)
+            result, final_merged_code, _ = self._execute_with_debug(merged_code, exec_callback)
             h_candidate = self._extract_score(result)
             
             # Algorithm 1, line 11: if h(s_candidate) ≥ h_best then
             if (self.higher_is_better and h_candidate >= h_best) or \
                (not self.higher_is_better and h_candidate <= h_best):
-                s_0 = merged_code
+                s_0 = final_merged_code  # Use debugged version
                 h_best = h_candidate
                 self.best_solution = s_0
                 self.best_score = h_best
@@ -320,11 +320,13 @@ class MLEStarAgent:
         model_desc = model.get("model_name", "")
         example_code = model.get("example_code", "")
         
+        available_packages = self._get_available_packages()
         prompt = prompts.prompt_2_initial_solution(
             self.task_desc,
             model_desc,
             example_code,
-            self.data_dir
+            self.data_dir,
+            available_packages
         )
         
         response = self._safe_query_llm(prompt)
@@ -333,11 +335,13 @@ class MLEStarAgent:
     
     def _merge_solutions(self, base_code: str, reference_code: str) -> Optional[str]:
         """A_merger: Merge base and reference solutions (Prompt 3)."""
+        available_packages = self._get_available_packages()
         prompt = prompts.prompt_3_merge_solutions(
             self.task_desc,
             base_code,
             reference_code,
-            self.data_dir
+            self.data_dir,
+            available_packages
         )
         
         response = self._safe_query_llm(prompt)
@@ -346,18 +350,20 @@ class MLEStarAgent:
     
     def _generate_default_solution(self, exec_callback: ExecCallbackType) -> str:
         """Generate a default solution if retrieval fails."""
+        available_packages = self._get_available_packages()
         prompt = prompts.prompt_2_initial_solution(
             self.task_desc,
             "Default baseline model",
             "# Simple baseline implementation",
-            self.data_dir
+            self.data_dir,
+            available_packages
         )
         response = self._safe_query_llm(prompt)
         code = extract_code(response)
         if code:
-            result = exec_callback(code)
+            result, final_code, _ = self._execute_with_debug(code, exec_callback)
             score = self._extract_score(result)
-            self.best_solution = code
+            self.best_solution = final_code  # Use debugged version
             self.best_score = score
             return code
         return "# Default solution placeholder"
@@ -390,7 +396,7 @@ class MLEStarAgent:
             # Step 5: Ablation study
             ablation_code = self._generate_ablation_study(s_t, T_abl)
             if ablation_code:
-                ablation_result = exec_callback(ablation_code)
+                ablation_result, _, _ = self._execute_with_debug(ablation_code, exec_callback)
                 ablation_output = ablation_result.get("feedback", {}).get("stdout", "")
                 
                 # Step 7: Summarize ablation
@@ -408,12 +414,12 @@ class MLEStarAgent:
             # Step 9: First refinement (k=0)
             c_t_0 = self._refine_code_block(code_block, plan)
             s_t_0 = s_t.replace(code_block, c_t_0)
-            result = exec_callback(s_t_0)
+            result, final_s_t_0, _ = self._execute_with_debug(s_t_0, exec_callback)
             h_t_0 = self._extract_score(result)
             
             if (self.higher_is_better and h_t_0 >= h_best) or \
                (not self.higher_is_better and h_t_0 <= h_best):
-                s_final = s_t_0
+                s_final = final_s_t_0  # Use debugged version
                 h_best = h_t_0
                 self.best_solution = s_final
                 self.best_score = h_best
@@ -428,12 +434,12 @@ class MLEStarAgent:
                 # Step 18: Refine with alternative plan
                 c_t_k = self._refine_code_block(code_block, alt_plan)
                 s_t_k = s_t.replace(code_block, c_t_k)
-                result = exec_callback(s_t_k)
+                result, final_s_t_k, _ = self._execute_with_debug(s_t_k, exec_callback)
                 h_t_k = self._extract_score(result)
                 
                 if (self.higher_is_better and h_t_k >= h_best) or \
                    (not self.higher_is_better and h_t_k <= h_best):
-                    s_final = s_t_k
+                    s_final = final_s_t_k  # Use debugged version
                     h_best = h_t_k
                     self.best_solution = s_final
                     self.best_score = h_best
@@ -522,11 +528,11 @@ class MLEStarAgent:
         
         # Step 2: Implement ensemble
         s_ens_0 = self._implement_ensemble(solutions, ensemble_plan)
-        result = exec_callback(s_ens_0)
+        result, final_s_ens_0, _ = self._execute_with_debug(s_ens_0, exec_callback)
         h_ens_0 = self._extract_score(result)
         
         # Track all ensembles for argmax selection (Algorithm 3, line 9)
-        ensemble_results = [(s_ens_0, h_ens_0, 0)]  # (solution, score, iteration)
+        ensemble_results = [(final_s_ens_0, h_ens_0, 0)]  # (solution, score, iteration) - use debugged version
         self.ensemble_plans.append((ensemble_plan, h_ens_0))
         
         # Steps 4-8: Alternative ensemble plans (Algorithm 3, lines 4-8)
@@ -536,10 +542,10 @@ class MLEStarAgent:
                 break
             
             s_ens_r = self._implement_ensemble(solutions, ensemble_plan_r)
-            result = exec_callback(s_ens_r)
+            result, final_s_ens_r, _ = self._execute_with_debug(s_ens_r, exec_callback)
             h_ens_r = self._extract_score(result)
             
-            ensemble_results.append((s_ens_r, h_ens_r, r))
+            ensemble_results.append((final_s_ens_r, h_ens_r, r))  # Use debugged version
             self.ensemble_plans.append((ensemble_plan_r, h_ens_r))
         
         # Algorithm 3, lines 9-10: r* = argmax, s_ens* = s_ens^{r*}
@@ -564,7 +570,8 @@ class MLEStarAgent:
     
     def _implement_ensemble(self, solutions: List[str], plan: str) -> str:
         """A_ensembler: Implement ensemble (Prompt 10)."""
-        prompt = prompts.prompt_10_implement_ensemble(solutions, plan, self.data_dir)
+        available_packages = self._get_available_packages()
+        prompt = prompts.prompt_10_implement_ensemble(solutions, plan, self.data_dir, available_packages)
         response = self._safe_query_llm(prompt)
         code = extract_code(response)
         return code if code else solutions[0]
@@ -655,6 +662,156 @@ class MLEStarAgent:
     def update_data_preview(self):
         """Update data preview."""
         self.data_preview = data_preview.generate(self.cfg.workspace_dir)
+    
+    def _get_available_packages(self) -> str:
+        """Get list of available packages from requirements.txt (like AIDE)."""
+        packages = []
+        try:
+            # Try to read from requirements.txt in workspace or current dir
+            req_paths = [
+                Path(self.cfg.workspace_dir) / "requirements.txt",
+                Path("requirements.txt"),
+                Path(__file__).parent.parent.parent.parent.parent / "requirements.txt",
+            ]
+            
+            for req_path in req_paths:
+                if req_path.exists():
+                    with open(req_path, 'r') as f:
+                        for line in f:
+                            line = line.strip()
+                            if line and not line.startswith("#"):
+                                # Extract package name (before ==, >=, <=, etc.)
+                                pkg = line.split("==")[0].split(">=")[0].split("<=")[0].split(">")[0].split("<")[0].strip()
+                                # Normalize package names (e.g., scikit_learn -> scikit-learn)
+                                pkg = pkg.replace("_", "-")
+                                if pkg and pkg not in packages:
+                                    packages.append(pkg)
+                    break
+        except Exception as e:
+            logger.debug(f"Could not read requirements.txt: {e}")
+        
+        # If no packages found, use fallback list (like AIDE)
+        if not packages:
+            packages = [
+                "numpy", "pandas", "scikit-learn", "statsmodels",
+                "xgboost", "lightgbm", "torch", "torchvision",
+                "torch-geometric", "bayesian-optimization", "timm",
+                "catboost", "transformers", "datasets", "matplotlib",
+                "seaborn", "plotly", "opencv-python", "nltk", "spacy"
+            ]
+        
+        # Shuffle and limit to reasonable number (like AIDE does)
+        random.shuffle(packages)
+        pkg_str = ", ".join([f"`{p}`" for p in packages[:25]])  # Show top 25
+        
+        return f"Your solution can use any relevant machine learning packages such as: {pkg_str}. Feel free to use any other packages too (all packages are already installed!). For neural networks, use PyTorch rather than TensorFlow. You have access to a GPU and can use CUDA for faster computations if needed."
+    
+    def _extract_error_info(self, exec_result: Dict) -> Optional[str]:
+        """Extract error information from execution result for debugging."""
+        if exec_result.get("action_status") != "FAILED":
+            return None
+        
+        feedback = exec_result.get("feedback", {})
+        if isinstance(feedback, dict):
+            # Try to get error from execution feedback
+            execution = feedback.get("execution", {})
+            if isinstance(execution, dict):
+                error = execution.get("error", "")
+                details = execution.get("details", "")
+                stderr = execution.get("stderr", "")
+                
+                # Combine error info
+                error_parts = []
+                if error:
+                    error_parts.append(f"Error: {error}")
+                if details:
+                    error_parts.append(f"Details: {details}")
+                if stderr:
+                    error_parts.append(f"STDERR:\n{stderr}")
+                
+                return "\n".join(error_parts) if error_parts else "Execution failed (no error details available)"
+            elif isinstance(execution, str):
+                return execution
+        elif isinstance(feedback, str):
+            return feedback
+        
+        return "Execution failed (no error details available)"
+    
+    def _execute_with_debug(self, code: str, exec_callback: ExecCallbackType, max_debug_attempts: int = 2, parent_node: Optional[Node] = None) -> Tuple[Dict, str, Optional[Node]]:
+        """
+        Execute code and automatically debug if it fails (per paper Section 3.4).
+        
+        Uses journal to track attempts (like AIDE pattern):
+        - Creates nodes for each attempt
+        - Maintains parent-child relationships
+        - Passes context to debug function
+        
+        Returns:
+            Tuple of (exec_result, final_code, final_node)
+        """
+        current_code = code
+        current_parent = parent_node
+        exec_result = exec_callback(current_code)
+        
+        # Create initial node for this execution attempt
+        initial_node = Node(
+            code=current_code,
+            plan="Initial execution attempt",
+            node_type="draft" if parent_node is None else "debug",
+            parent=current_parent,
+            instruction_prompt="Code execution"
+        )
+        self.parse_exec_result(initial_node, exec_result)
+        self.journal.append(initial_node)
+        
+        # If execution succeeds, return immediately
+        if exec_result.get("action_status") != "FAILED":
+            logger.info("Execution succeeded")
+            return exec_result, current_code, initial_node
+        
+        # Try to debug the error (per paper: iterative debugging)
+        logger.warning(f"Execution failed, attempting automatic debug (max {max_debug_attempts} attempts)...")
+        debug_node = initial_node  # Start with the failed node
+        
+        for attempt in range(max_debug_attempts):
+            error_info = self._extract_error_info(exec_result)
+            if not error_info:
+                logger.warning("No error info available, cannot debug")
+                break
+            
+            logger.info(f"Debug attempt {attempt + 1}/{max_debug_attempts}")
+            logger.debug(f"Error: {error_info[:200]}...")  # Log first 200 chars
+            
+            # Debug with context from parent node (like AIDE)
+            fixed_code = self._debug_code(current_code, error_info, parent_node=debug_node)
+            if not fixed_code:
+                logger.warning("Debug failed to produce fixed code")
+                break
+            
+            # Create debug node (child of failed node)
+            debug_node = Node(
+                code=fixed_code,
+                plan=f"Debug attempt {attempt + 1}",
+                node_type="debug",
+                parent=debug_node,  # Parent is the previous failed attempt
+                instruction_prompt="Debugging failed code"
+            )
+            
+            # Try executing the fixed code
+            exec_result = exec_callback(fixed_code)
+            self.parse_exec_result(debug_node, exec_result)
+            self.journal.append(debug_node)
+            
+            if exec_result.get("action_status") != "FAILED":
+                logger.info(f"✅ Debug successful! Code fixed after {attempt + 1} attempt(s)")
+                return exec_result, fixed_code, debug_node
+            
+            current_code = fixed_code  # Try debugging again with the new code
+            # Next iteration will use this debug_node as parent
+        
+        # All debug attempts failed
+        logger.warning(f"❌ Debug failed after {max_debug_attempts} attempts, returning original failure")
+        return exec_result, current_code, debug_node
     
     def step(self, exec_callback: ExecCallbackType):
         """
