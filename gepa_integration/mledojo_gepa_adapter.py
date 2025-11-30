@@ -26,8 +26,7 @@ from mledojo.utils import load_config, create_config_from_args, get_metric
 
 logger = logging.getLogger("gepa_mledojo")
 
-# Verification print to confirm module reload
-print("DEBUG: Loaded MLEDojoGEPAAdapter module with PATH FIX v3", file=sys.stderr)
+print("DEBUG: Loaded MLEDojoGEPAAdapter module v4 (Nested Data Dir Fix)", file=sys.stderr)
 
 @dataclass
 class CompetitionConfig:
@@ -121,7 +120,6 @@ class MLEDojoGEPAAdapter:
             except Exception as e:
                 err_msg = f"Failed to evaluate {comp_config.name}: {e}"
                 print(f"ERROR: {err_msg}", file=sys.stderr)
-                # Print traceback to stderr to see exactly where it fails
                 traceback.print_exc()
                 
                 outputs.append({'error': str(e)})
@@ -156,12 +154,16 @@ class MLEDojoGEPAAdapter:
         Run AIDE agent with custom prompts on a single competition.
         """
         # Prepare configuration
-        print(f"DEBUG: Preparing config for {comp_config.name}", file=sys.stderr)
         config = self._prepare_config(comp_config)
         
-        # Determine competition data path
-        # Ensure we point to the inner data folder: data/prepared/<comp>/data
-        comp_data_path = os.path.join(config['competition']['data_dir'], "data")
+        # Verify if config setup was successful
+        if 'desc_file' not in config:
+             raise ValueError("Config preparation failed: 'desc_file' missing")
+
+        # Determine competition data path for registry
+        # The registry usually expects the folder containing 'public'/'private'
+        # Since _prepare_config now ensures config['competition']['data_dir'] points there, use it directly.
+        comp_data_path = config['competition']['data_dir']
         
         # Get metric class
         try:
@@ -195,10 +197,19 @@ class MLEDojoGEPAAdapter:
         # Setup AIDE agent with custom prompts
         print(f"DEBUG: Setting up AIDE agent with desc_file: {config.get('desc_file')}", file=sys.stderr)
         
-        # Verify file exists one last time before passing to agent
-        if not os.path.exists(config.get('desc_file', '')):
-            print(f"CRITICAL ERROR: File still does not exist: {config.get('desc_file')}", file=sys.stderr)
-            
+        # FINAL SAFETY CHECK: If the description file doesn't exist, CREATE IT.
+        # This prevents the specific FileNotFoundError we've been seeing.
+        desc_file = config.get('desc_file')
+        if desc_file and not os.path.exists(desc_file):
+            print(f"WARNING: Description file missing at {desc_file}. Creating fallback.", file=sys.stderr)
+            try:
+                os.makedirs(os.path.dirname(desc_file), exist_ok=True)
+                with open(desc_file, 'w') as f:
+                    f.write(f"Task: {comp_config.name}\n")
+                    f.write("Please explore the data directory to understand the task.\n")
+            except Exception as e:
+                print(f"ERROR creating fallback description: {e}", file=sys.stderr)
+
         agent, journal, cfg = setup_aide_agent(
             config=config,
             custom_prompts=custom_prompts
@@ -243,44 +254,51 @@ class MLEDojoGEPAAdapter:
         
         # Resolve paths
         cwd = os.getcwd()
-        abs_data_dir = os.path.abspath(comp_config.data_dir)
-        comp_root_dir = os.path.join(abs_data_dir, comp_config.name)
+        abs_data_base = os.path.abspath(comp_config.data_dir)
+        comp_root = os.path.join(abs_data_base, comp_config.name)
         
-        print(f"DEBUG: CWD={cwd}, DataDir={abs_data_dir}, CompRoot={comp_root_dir}", file=sys.stderr)
+        # CRITICAL FIX: The actual data structure is <comp>/data/public/...
+        # So the 'data_dir' passed to AIDE must be <comp>/data
+        nested_data_dir = os.path.join(comp_root, "data")
+        
+        final_data_dir = comp_root
+        if os.path.exists(nested_data_dir):
+            final_data_dir = nested_data_dir
+            print(f"DEBUG: Detected nested data folder. Using: {final_data_dir}", file=sys.stderr)
+        else:
+            print(f"DEBUG: No nested 'data' folder found. Using: {final_data_dir}", file=sys.stderr)
 
         config['competition']['name'] = comp_config.name
-        config['competition']['data_dir'] = comp_root_dir
+        config['competition']['data_dir'] = final_data_dir
         
-        # SEARCH LOGIC - Strict order based on check_paths output
-        path_options = [
-            os.path.join(comp_root_dir, "data", "public", "description.txt"), # Correct path
-            os.path.join(comp_root_dir, "public", "description.txt"),
-            os.path.join(comp_root_dir, "description.txt"),
-            # Also try without the intermediate 'data' folder just in case
-            os.path.join(abs_data_dir, comp_config.name, "public", "description.txt")
-        ]
+        # Now determine description path based on the FINAL data dir
+        # Expected structure: <final_data_dir>/public/description.txt
+        expected_desc_path = os.path.join(final_data_dir, "public", "description.txt")
         
-        desc_path = None
-        for p in path_options:
-            if os.path.exists(p):
-                desc_path = p
-                print(f"DEBUG: Found description at {p}", file=sys.stderr)
-                break
-        
-        if desc_path:
-            config['desc_file'] = desc_path
+        if os.path.exists(expected_desc_path):
+            config['desc_file'] = expected_desc_path
+            print(f"DEBUG: Found description at {expected_desc_path}", file=sys.stderr)
         else:
-            print(f"ERROR: Description file NOT FOUND. Checked: {path_options}", file=sys.stderr)
+            # Try to find it nearby if standard path fails
+            fallback_options = [
+                os.path.join(comp_root, "public", "description.txt"),
+                os.path.join(comp_root, "description.txt")
+            ]
             
-            # FORCE FALLBACK: Create dummy file to prevent crashing
-            dummy_path = os.path.join(comp_config.output_dir, "description.txt")
-            os.makedirs(os.path.dirname(dummy_path), exist_ok=True)
-            with open(dummy_path, 'w') as f:
-                f.write(f"Task: {comp_config.name}\n")
-                f.write("Please explore the data directory to understand the task.\n")
+            found = False
+            for p in fallback_options:
+                if os.path.exists(p):
+                    config['desc_file'] = p
+                    print(f"DEBUG: Found description at fallback {p}", file=sys.stderr)
+                    found = True
+                    break
             
-            print(f"DEBUG: Created dummy description at {dummy_path}", file=sys.stderr)
-            config['desc_file'] = dummy_path
+            if not found:
+                print(f"ERROR: Description NOT FOUND. Expected at {expected_desc_path}", file=sys.stderr)
+                # If we still can't find it, we MUST set desc_file to something, 
+                # or AIDE will default to constructing a path that doesn't exist.
+                # We'll stick to the expected path and let the fallback creator in _run_aide_agent handle it.
+                config['desc_file'] = expected_desc_path
             
         config['env']['max_steps'] = comp_config.max_steps
         config['env']['execution_timeout'] = comp_config.execution_timeout
