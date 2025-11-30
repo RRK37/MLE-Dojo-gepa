@@ -59,7 +59,7 @@ agent:
       api_idx: -1
       api_key: null  # Will use ANTHROPIC_API_KEY environment variable
       temperature: 0.0
-      top_p: 1.0
+      # top_p: 1.0
 
   # hyperparameters for the tree search
   search:
