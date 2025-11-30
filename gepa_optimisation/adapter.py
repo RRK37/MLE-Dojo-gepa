@@ -180,12 +180,15 @@ REMEMBER: You MUST create submission.csv in EVERY iteration. Without it, your sc
                 
                 # Extract CV score from stdout if no submission reward
                 # This is critical for GEPA optimization when agents explore solutions without submissions
+                print(f"[Adapter Debug] Attempting CV extraction - execution_succeeded={execution_succeeded}, reward={reward}")
+                print(f"[Adapter Debug] Obs type: {type(obs)}, Obs keys: {list(obs.keys()) if isinstance(obs, dict) else 'N/A'}")
+                
                 cv_score = self._extract_cv_score_from_output(obs, execution_succeeded)
                 
                 # Use CV score as reward if found and no submission reward exists
                 if cv_score > 0 and reward == 0.0:
                     reward = cv_score
-                    print(f"[Adapter] Using CV score from iteration output as reward: {reward:.4f}")
+                    print(f"[Adapter] ✓ Using CV score from iteration output as reward: {reward:.4f}")
                 
                 print(f"[Adapter] Step {steps}: action_status='{status_str}', exec_status='{execution_status}', reward={reward:.4f}, is_success={is_success}")
                 
@@ -286,57 +289,75 @@ REMEMBER: You MUST create submission.csv in EVERY iteration. Without it, your sc
             
         import re
         
-        # Navigate the observation structure to find stdout
-        # Structure: obs["feedback"][mode]["raw_results"]["execution"]["stdout"]
-        if "feedback" not in obs:
-            return 0.0
+        # The observation structure from env.step() contains feedback with execution results
+        # We need to check multiple possible locations for the stdout
+        stdout_text = None
         
-        feedback = obs["feedback"]
-        if not isinstance(feedback, dict):
-            return 0.0
-        
-        # Iterate through feedback modes (e.g., "base", "structured")
-        for feedback_mode, feedback_data in feedback.items():
-            if not isinstance(feedback_data, dict):
-                continue
+        # Method 1: Check if feedback is directly in obs (most common case)
+        if "feedback" in obs and isinstance(obs["feedback"], dict):
+            feedback = obs["feedback"]
+            
+            # Check for nested feedback structure with modes
+            for feedback_mode, feedback_data in feedback.items():
+                if not isinstance(feedback_data, dict):
+                    continue
                 
-            # Get raw execution results
-            raw_results = feedback_data.get("raw_results", {})
-            if not isinstance(raw_results, dict):
-                continue
+                # Try raw_results path first (from feedback manager)
+                if "raw_results" in feedback_data:
+                    raw_results = feedback_data["raw_results"]
+                    if isinstance(raw_results, dict) and "execution" in raw_results:
+                        exec_result = raw_results["execution"]
+                        if "stdout" in exec_result:
+                            stdout_text = exec_result["stdout"]
+                            break
+                        elif "output" in exec_result:
+                            stdout_text = exec_result["output"]
+                            break
             
-            # Get execution stdout
-            exec_result = raw_results.get("execution", {})
-            stdout_text = exec_result.get("stdout", "")
-            
-            if not stdout_text:
-                continue
-            
-            print(f"[Adapter] Searching for CV score in stdout (length: {len(stdout_text)})")
-            
-            # Parse CV score patterns from stdout
-            # Common patterns:
-            # - "5-fold cross-validation accuracy: 0.8137"
-            # - "Cross-validation score: 0.8137"
-            # - "CV accuracy: 0.8137"
-            # - "Accuracy: 0.8137" (fallback)
-            patterns = [
-                r'(?:cross[-\s]?validation|cv)\s+(?:accuracy|score)[:\s]+([0-9.]+)',
-                r'(?:validation|test)\s+(?:accuracy|score)[:\s]+([0-9.]+)',
-                r'accuracy[:\s]+([0-9.]+)',
-                r'score[:\s]+([0-9.]+)',
-            ]
-            
-            for pattern in patterns:
-                match = re.search(pattern, stdout_text, re.IGNORECASE)
-                if match:
-                    cv_score = float(match.group(1))
-                    # Sanity check: scores should be between 0 and 1 (or 0-100 if percentage)
-                    if cv_score > 1.0:
-                        cv_score = cv_score / 100.0  # Convert percentage to decimal
-                    if 0.0 <= cv_score <= 1.0:
-                        print(f"[Adapter] Extracted CV score: {cv_score:.4f} using pattern: {pattern}")
-                        return cv_score
+            # If not found in nested structure, check direct execution key
+            if not stdout_text and "execution" in feedback:
+                exec_result = feedback["execution"]
+                if isinstance(exec_result, dict):
+                    stdout_text = exec_result.get("stdout") or exec_result.get("output")
         
-        print(f"[Adapter] No CV score found in execution output")
+        # Method 2: Check if obs itself has execution key (alternative structure)
+        if not stdout_text and "execution" in obs:
+            exec_result = obs["execution"]
+            if isinstance(exec_result, dict):
+                stdout_text = exec_result.get("stdout") or exec_result.get("output")
+        
+        if not stdout_text:
+            print(f"[Adapter] Could not find stdout in observation structure")
+            return 0.0
+        
+        print(f"[Adapter] Found stdout, searching for CV score (length: {len(stdout_text)})")
+        print(f"[Adapter] Stdout preview: {stdout_text[:200]}")
+        
+        # Parse CV score patterns from stdout
+        # Common patterns:
+        # - "Cross-validated accuracy: 0.8283"
+        # - "5-fold cross-validation accuracy: 0.8137"
+        # - "Cross-validation score: 0.8137"
+        # - "CV accuracy: 0.8137"
+        # - "Accuracy: 0.8137" (fallback)
+        patterns = [
+            r'cross[-\s]?validated?\s+(?:accuracy|score)[:\s]+([0-9.]+)',
+            r'(?:cv|validation)\s+(?:accuracy|score)[:\s]+([0-9.]+)',
+            r'(?:test|val)\s+(?:accuracy|score)[:\s]+([0-9.]+)',
+            r'accuracy[:\s]+([0-9.]+)',
+            r'score[:\s]+([0-9.]+)',
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, stdout_text, re.IGNORECASE)
+            if match:
+                cv_score = float(match.group(1))
+                # Sanity check: scores should be between 0 and 1 (or 0-100 if percentage)
+                if cv_score > 1.0:
+                    cv_score = cv_score / 100.0  # Convert percentage to decimal
+                if 0.0 <= cv_score <= 1.0:
+                    print(f"[Adapter] ✓ Extracted CV score: {cv_score:.4f} using pattern: {pattern}")
+                    return cv_score
+        
+        print(f"[Adapter] No CV score pattern matched in stdout")
         return 0.0
