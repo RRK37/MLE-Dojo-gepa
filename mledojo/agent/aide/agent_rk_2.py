@@ -91,7 +91,94 @@ class Agent:
         self.insight_generator = InsightGenerator()
         self._theme_cache = None
         self._theme_cache_size = 0
+        
+        # Token management - reserve tokens for task desc, instructions, etc.
+        # Claude has 200K input limit, reserve significant buffer for other content
+        self.max_memory_tokens = 50000  # Conservative limit for Memory section
+        self.max_total_prompt_tokens = 180000  # Leave buffer for safety
 
+    
+    def _count_tokens(self, text: str) -> int:
+        """Count tokens in a text string."""
+        try:
+            return len(self.tokenizer.encode(text))
+        except Exception as e:
+            logger.warning(f"Failed to count tokens: {e}, using rough estimate")
+            # Rough estimate: ~4 chars per token
+            return len(text) // 4
+    
+    def _generate_truncated_summary(self, max_tokens: int = None) -> str:
+        """Generate a summary that fits within token budget.
+        
+        Prioritizes recent and high-scoring solutions.
+        """
+        if max_tokens is None:
+            max_tokens = self.max_memory_tokens
+        
+        good_nodes = self.journal.good_nodes
+        if not good_nodes:
+            return ""
+        
+        # Sort by score (descending) and recency (descending)
+        # Give higher weight to both score and recency
+        sorted_nodes = sorted(
+            good_nodes,
+            key=lambda n: (n.metric.value if hasattr(n, 'metric') else 0.0, n.step if hasattr(n, 'step') else 0),
+            reverse=True
+        )
+        
+        summary_parts = []
+        current_tokens = 0
+        nodes_included = 0
+        
+        for node in sorted_nodes:
+            # Generate summary for this node (without code to save tokens)
+            node_summary = f"Design: {node.plan}\n"
+            
+            if node.feedback is not None:
+                # Truncate feedback if it's too long
+                feedback_str = str(node.feedback)
+                if len(feedback_str) > 500:
+                    feedback_str = feedback_str[:500] + "...[truncated]"
+                node_summary += f"Execution Feedback: {feedback_str}\n"
+            
+            if node.raw_score is not None:
+                node_summary += f"Test Metric Score: {node.raw_score}\n"
+            if node.position_score is not None:
+                node_summary += f"Test Position Score: {node.position_score}\n"
+            
+            node_tokens = self._count_tokens(node_summary)
+            
+            # Check if adding this node would exceed limit
+            if current_tokens + node_tokens > max_tokens:
+                # If we haven't included any nodes yet, include at least one (truncated)
+                if nodes_included == 0:
+                    # Drastically truncate to fit
+                    node_summary = f"Design: {node.plan[:200]}...\n"
+                    if node.position_score is not None:
+                        node_summary += f"Position Score: {node.position_score}\n"
+                    summary_parts.append(node_summary)
+                    nodes_included += 1
+                break
+            
+            summary_parts.append(node_summary)
+            current_tokens += node_tokens
+            nodes_included += 1
+        
+        # Add summary statistics
+        total_nodes = len(good_nodes)
+        if nodes_included < total_nodes:
+            summary_parts.append(
+                f"\n[Showing {nodes_included} of {total_nodes} solutions. "
+                f"Omitted {total_nodes - nodes_included} lower-scoring solutions to manage context length.]\n"
+            )
+        
+        return "\n-------------------------------\n".join(summary_parts)
+    
+    def _estimate_prompt_tokens(self, prompt_dict: Dict[str, Any]) -> int:
+        """Estimate total tokens in a prompt dictionary."""
+        prompt_str = compile_prompt_to_md(prompt_dict)
+        return self._count_tokens(prompt_str)
     
     def search_policy(self) -> Node | None:
         """Select a node to work on (or None to draft a new node)."""
@@ -214,10 +301,25 @@ class Agent:
             
             if not isinstance(msg['content'], str):
                 raise ValueError("Message content must be a string")
+        
+        # Token validation to prevent API errors
+        total_tokens = sum(self._count_tokens(msg['content']) for msg in messages)
+        if total_tokens > self.max_total_prompt_tokens:
+            logger.error(f"Prompt exceeds token limit: {total_tokens} > {self.max_total_prompt_tokens}")
+            raise ValueError(
+                f"Prompt is too long: {total_tokens} tokens exceeds limit of {self.max_total_prompt_tokens}. "
+                "This usually means the Memory section is too large. Consider reducing max_memory_tokens."
+            )
+        
+        logger.info(f"Sending prompt with {total_tokens} tokens to LLM")
         return self.model_client.chat_completion(messages, self.model_settings)
     
     def plan_and_code_query(self, prompt, retries=3) -> tuple[str, str]:
         """Generate a natural language plan + code in the same LLM call and split them apart."""
+        # Log prompt structure for debugging
+        prompt_tokens = self._estimate_prompt_tokens(prompt)
+        logger.info(f"plan_and_code_query: Estimated {prompt_tokens} tokens in prompt")
+        
         completion_text = None
         for _ in range(retries):
             completion_text, cost = self.query_llm(
@@ -247,7 +349,7 @@ class Agent:
                 "for a solution and then implement this solution in Python. We will now provide a description of the task."
             ),
             "Task description": self.task_desc,
-            "Memory": self.journal.generate_summary(),
+            "Memory": self._generate_truncated_summary(),
             "Instructions": {},
         }
         
@@ -292,7 +394,7 @@ class Agent:
                 "then implement this improvement in Python based on the provided previous solution. "
             ),
             "Task description": self.task_desc,
-            "Memory": self.journal.generate_summary(),
+            "Memory": self._generate_truncated_summary(),
             "Instructions": {},
         }
         
