@@ -21,14 +21,20 @@ from mledojo.agent.aide.utils.config import Config, StageConfig, SearchConfig, A
 def main():
     # --- A. Setup Static Configuration ---
     # Build config using OmegaConf for proper structure
+    # Create necessary directories
+    workspace_dir = os.path.abspath("./workspace")
+    log_dir = os.path.abspath("./logs")
+    os.makedirs(workspace_dir, exist_ok=True)
+    os.makedirs(log_dir, exist_ok=True)
+    
     cfg_dict = {
         "data_dir": "./input",
         "desc_file": None,
         "name": "gepa-optimization",
         "goal": "Optimize system prompt for best competition performance",
         "eval": None,
-        "log_dir": "./logs",
-        "workspace_dir": "./workspace",
+        "log_dir": log_dir,
+        "workspace_dir": workspace_dir,
         "preprocess_data": False,
         "copy_data": False,
         "exp_name": "gepa_opt",
