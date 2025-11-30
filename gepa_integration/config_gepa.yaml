@@ -9,7 +9,7 @@ gepa:
   reflection_lm: "anthropic/claude-sonnet-4-20250514"
   
   # LLM used by AIDE agent (being optimized)
-  task_lm: "anthropic/claude-sonnet-4-20250514"
+  task_lm: null
   
   # Training competitions (used for optimization)
   train_competitions:
