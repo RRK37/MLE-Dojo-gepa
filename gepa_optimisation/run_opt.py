@@ -45,7 +45,7 @@ def main():
             "expose_prediction": True,
             "data_preview": True,
             "code": {
-                "model_name": "claude-4-5-sonnet",
+                "model_name": "claude-sonnet-4-5",
                 "model_mode": "claude",
                 "port": 8314,
                 "max_completion_tokens": 8192,
