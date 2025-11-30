@@ -27,8 +27,6 @@ agent:
   # LLM Configuration
   model_mode: "claude"  # Options: claude, openai, gemini
   model_name: "claude-opus-4-5"  # Latest Claude Opus 4.5 (released Nov 24, 2025) - best for MLE-STAR
-  temperature: 0.7
-  top_p: 1.0
   max_completion_tokens: 8192
   max_prompt_tokens: 30000
   api_idx: 0
