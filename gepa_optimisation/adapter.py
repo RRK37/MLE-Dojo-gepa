@@ -7,9 +7,21 @@ import json
 import csv
 from pathlib import Path
 from datetime import datetime
-import matplotlib.pyplot as plt
 import matplotlib
-matplotlib.use('TkAgg')  # Use interactive backend
+import os
+
+# Set backend based on environment (headless vs display)
+if os.environ.get('DISPLAY') is None and os.name != 'nt':
+    # Headless environment (Linux without display)
+    matplotlib.use('Agg')
+else:
+    # Environment with display
+    try:
+        matplotlib.use('TkAgg')
+    except ImportError:
+        matplotlib.use('Agg')
+
+import matplotlib.pyplot as plt
 
 class MLEDojoGEPAAdapter(GEPAAdapter):
     def __init__(self, 
@@ -416,11 +428,20 @@ REMEMBER: You MUST create submission.csv in EVERY iteration. Without it, your sc
     
     def _setup_live_plot(self):
         """Initialize the live plotting window with dark theme and pink/green styling."""
+        # Check if we're in headless mode
+        if matplotlib.get_backend() == 'Agg':
+            print("[Adapter] Live plotting disabled (headless environment)")
+            self.enable_live_plot = False
+            return
+        
         plt.ion()  # Enable interactive mode
         plt.style.use('dark_background')
         
         self.fig, self.ax = plt.subplots(figsize=(12, 6))
-        self.fig.canvas.manager.set_window_title('Journal Node Scores - Live')
+        try:
+            self.fig.canvas.manager.set_window_title('Journal Node Scores - Live')
+        except AttributeError:
+            pass  # Some backends don't support window titles
         
         self.ax.set_xlabel('Node ID', fontsize=12, fontweight='bold')
         self.ax.set_ylabel('Score', fontsize=12, fontweight='bold')
