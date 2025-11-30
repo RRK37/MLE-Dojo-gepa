@@ -76,7 +76,8 @@ def main():
     # In the prepared data structure, this is at data/prepared/{competition}/data/
     data_dir = os.path.join(os.path.dirname(__file__), "..", "data", "prepared", competition_name, "data")
     data_dir = os.path.abspath(data_dir)
-    output_dir = "./output"
+    output_dir = os.path.abspath("./output")
+    os.makedirs(output_dir, exist_ok=True)  # Ensure output directory exists
     task_desc = "Predict survival on the Titanic. Optimize for accuracy."
     
     # Workaround: Fix Titanic data structure to match framework expectations

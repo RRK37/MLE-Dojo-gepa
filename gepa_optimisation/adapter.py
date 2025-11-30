@@ -98,8 +98,14 @@ class MLEDojoGEPAAdapter(GEPAAdapter):
                     if len(result) == 5:
                         obs, reward, terminated, truncated, info = result
                     elif len(result) == 2:
-                        obs, info = result
-                        reward = 0.0
+                        obs, reward_or_info = result
+                        # Check if second value is a dict (info) or float (reward)
+                        if isinstance(reward_or_info, dict):
+                            info = reward_or_info
+                            reward = info.get("reward", 0.0)
+                        else:
+                            reward = float(reward_or_info)
+                            info = {}
                         terminated = False
                         truncated = False
                     else:
@@ -127,7 +133,7 @@ class MLEDojoGEPAAdapter(GEPAAdapter):
                 return {
                     "action_status": "SUCCESS" if is_success else "FAILED",
                     "feedback": obs,  # Pass full observation dict as feedback
-                    "current_raw_score": info.get("raw_score", reward),
+                    "current_raw_score": info.get("raw_score", reward) if isinstance(info, dict) else reward,
                     "current_position_score": reward,  # Reward is the position score
                 }
 
