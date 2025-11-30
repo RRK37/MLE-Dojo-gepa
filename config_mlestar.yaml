@@ -20,51 +20,34 @@ env:
 # Agent Type
 agent_type: "mlestar"
 
-# MLE-STAR specific configuration
+# Agent configuration (AIDE-style for workspace management)
 agent:
-  # LLM Configuration - Claude models as primary
-  model_mode: "claude"  # Options: claude, openai, gemini
-  model_name: "claude-3-sonnet-20240229"  # Default to Claude Sonnet 4.5
-  reasoning_model: "claude-3-opus-20240229"  # For complex reasoning tasks
-  temperature: 0.3  # Lower for more deterministic outputs
-  top_p: 0.9
-  max_completion_tokens: 4096
-  max_prompt_tokens: 200000  # Claude 3.5 supports larger context
+  # LLM Configuration
+  model_mode: "openai"  # Options: openai, claude, gemini
+  model_name: "gpt-4"  # Default model
+  temperature: 0.7
+  top_p: 1.0
+  max_completion_tokens: 8192
+  max_prompt_tokens: 30000
+  api_idx: 0
+  api_key: ""  # Set via environment variable
   
-  # Research & Web Search
-  enable_web_search: true
-  search_provider: "perplexity"  # Options: perplexity, serper, none
-  max_search_results: 5
-  research_depth: "moderate"  # quick, moderate, deep
-  
-  # MLE-STAR Pipeline Configuration
-  max_initial_models: 3
-  max_refinement_steps: 5
-  ensemble_size: 3
-  ablation_study: true
-  enable_self_reflection: true
-  
-  # Search & Evaluation
+  # AIDE-style config
+  steps: 20  # Total steps for MLE-STAR workflow
+  data_preview: true
+  expose_prediction: false
+  k_fold_validation: 1
+
+# MLE-STAR specific configuration
+mlestar:
   search_iterations: 3
-  search_depth: 2
-  evaluation_metrics: ["accuracy", "f1", "inference_time"]
-  
-  # File paths
-  work_dir: "mle_star_workspace"
-  save_interval: 5  # Save state every N steps
-  
-  # Logging & Debugging
-  log_level: "INFO"  # DEBUG, INFO, WARNING, ERROR
-  debug: false
-  log_ablation_studies: true
-  
-  # Advanced Settings
-  max_parallel_models: 2  # For parallel model training
-  cache_research: true  # Cache web search results
-  enable_code_analysis: true  # Enable static code analysis
-  
+  refinement_iterations: 5
+  inner_refinement_steps: 3
+  ensemble_iterations: 3
+  num_models_to_retrieve: 3
+  subsample_size: 30000
+
 # API Keys (should be set as environment variables)
-# - PERPLEXITY_API_KEY
-# - ANTHROPIC_API_KEY
-# - OPENAI_API_KEY
-# - SERPER_API_KEY
+# - PERPLEXITY_API_KEY (for web search)
+# - OPENAI_API_KEY (for LLM)
+# - ANTHROPIC_API_KEY (if using Claude)

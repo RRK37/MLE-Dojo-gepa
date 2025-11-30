@@ -1,70 +1,112 @@
 """
 MLE-STAR: Machine Learning Engineering - Search, Target, and Refine
 
-This module implements the MLE-STAR agent that inherits from KaggleAgent
-and adds MLE-STAR specific functionality for automated machine learning.
+This module implements the MLE-STAR agent following the exact methodology
+from PaperMethod.md (Algorithms 1, 2, 3) with MLE-Dojo integration.
 """
 
 import os
-import json
-import yaml
 import logging
-import time
+import json
 import re
-import pickle
 import asyncio
 import tiktoken
-import aiohttp
-from typing import Dict, List, Optional, Any, Tuple, Union, Callable
-from pathlib import Path
-from dataclasses import asdict, dataclass
-from tenacity import (
-    retry,
-    stop_after_attempt,
-    wait_exponential,
-    retry_if_exception_type
-)
-
-import numpy as np
-import pandas as pd
-from tqdm import tqdm
+from typing import Any, Callable, Dict, List, Optional, Tuple
+from dataclasses import dataclass
 from openai import OpenAI
 
-from mledo.chat import ChatClient, ModelSettings
-from google import genai
-from google.genai import types
-from mledojo.agent.mleagent.agent import KaggleAgent, LLMConfig
-
+from mledojo.agent.aide.journal import Journal, Node, ExecutionResult
+from mledojo.agent.aide.utils.config import Config
+from mledojo.agent.aide.utils import data_preview
+from mledojo.agent.aide.utils.response import (
+    extract_code,
+    extract_text_up_to_code,
+    wrap_code
+)
+from mledojo.agent.aide.utils.util import (
+    compile_prompt_to_md,
+    opt_messages_to_list,
+)
+from mledojo.agent.aide.utils.metric import MetricValue, WorstMetricValue
+from mledojo.chat import ChatClient, ModelSettings
 from .prompt import prompts
 from .config import MLEStarConfig
 
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("mlestar")
 
-@dataclass
-class SearchResult:
-    """Container for search results."""
-    title: str
-    url: str
-    snippet: str
-    source: str = "web"
-    metadata: Dict = None
+ExecCallbackType = Callable[[str], Dict]
 
 
-class MLEStarAgent(KaggleAgent):
+class MLEStarAgent:
     """
-    MLE-STAR: Machine Learning Engineering - Search, Target, and Refine agent.
+    MLE-STAR Agent implementing Algorithms 1, 2, 3 from PaperMethod.md
     
-    This agent implements the MLE-STAR methodology for automated machine learning,
-    combining search-based optimization with targeted refinement of ML pipelines.
+    Algorithm 1: Search → Initial Solution (merging)
+    Algorithm 2: Targeted Refinement (ablation → extract → refine)
+    Algorithm 3: Ensemble Strategies
     """
     
-    def __init_web_clients(self):
-        """Initialize the web search client."""
-        self.web_client = None
+    def __init__(
+        self,
+        task_desc: str,
+        cfg: Config,
+        journal: Journal,
+        higher_is_better: bool,
+        data_dir: str,
+        output_dir: str,
+        mlestar_cfg: Optional[MLEStarConfig] = None,
+    ):
+        self.task_desc = task_desc
+        self.cfg = cfg
+        self.acfg = cfg.agent
+        self.journal = journal
+        self.higher_is_better = higher_is_better
+        self.data_preview: Optional[str] = None
+        self.data_dir = data_dir
+        self.output_dir = output_dir
+        self.mlestar_cfg = mlestar_cfg or MLEStarConfig()
         
-        # Initialize Perplexity client if API key is available
+        # State tracking
+        self.total_cost = 0.0
+        self.cost_history = []
+        self.conversation_history = []
+        
+        # MLE-STAR specific state
+        self.retrieved_models: List[Dict] = []
+        self.initial_solutions: List[Tuple[str, float]] = []  # (code, score)
+        self.best_solution: Optional[str] = None
+        self.best_score: float = -float('inf') if higher_is_better else float('inf')
+        self.ablation_history: List[str] = []
+        self.refined_code_blocks: List[str] = []
+        self.refinement_plans: List[Tuple[str, float]] = []  # (plan, score)
+        self.ensemble_solutions: List[str] = []
+        self.ensemble_plans: List[Tuple[str, float]] = []
+        
+        # LLM settings
+        self.llm_config = self.acfg.code
+        self.tokenizer = tiktoken.encoding_for_model('gpt-4')
+        self.total_tokens = 0
+        
+        # Initialize model client
+        self.model_client = ChatClient(
+            model_name=self.llm_config.model_name,
+            model_category=self.llm_config.model_mode,
+            api_idx=self.llm_config.api_idx,
+            port=self.llm_config.port,
+            api_key=self.llm_config.api_key
+        )
+        self.model_settings = ModelSettings(
+            max_completion_tokens=self.llm_config.max_completion_tokens,
+            temperature=self.llm_config.temperature,
+            top_p=self.llm_config.top_p
+        )
+        
+        # Initialize web search client
+        self._init_web_client()
+    
+    def _init_web_client(self):
+        """Initialize web search client (Perplexity)."""
+        self.web_client = None
         perplexity_key = os.getenv('PERPLEXITY_API_KEY')
         if perplexity_key:
             try:
@@ -72,48 +114,28 @@ class MLEStarAgent(KaggleAgent):
                     api_key=perplexity_key,
                     base_url="https://api.perplexity.ai"
                 )
-                self.logger.info("Initialized Perplexity web client")
+                logger.info("Initialized Perplexity web client")
             except Exception as e:
-                self.logger.error(f"Failed to initialize Perplexity client: {str(e)}")
-                self.web_client = None
-        
-        if not self.web_client:
-            self.logger.warning("No web search client available. Set PERPLEXITY_API_KEY environment variable.")
+                logger.error(f"Failed to initialize Perplexity client: {str(e)}")
     
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=2, max=10),
-        retry=retry_if_exception_type((
-            aiohttp.ClientError,
-            asyncio.TimeoutError,
-            Exception
-        ))
-    )
-    async def search_web(self, query: str, max_results: int = 5) -> List[SearchResult]:
-        """
-        Perform web search using Perplexity API.
+    def query_llm(self, system_message: str, user_message: Optional[str] = None) -> Tuple[str, float]:
+        """Query the LLM model."""
+        system_message = compile_prompt_to_md(system_message) if system_message else None
+        user_message = compile_prompt_to_md(user_message) if user_message else None
+        messages = opt_messages_to_list(system_message, user_message)
         
-        Args:
-            query: Search query
-            max_results: Maximum number of results to return (max 20)
-            
-        Returns:
-            List of SearchResult objects
-            
-        Raises:
-            ValueError: If search provider is not configured
-            Exception: For any other errors during search
-        """
-        if not hasattr(self, 'web_client'):
-            self.__init_web_clients()
-        
+        response = self.model_client.chat_completion(messages, self.model_settings)
+        cost = 0.0  # TODO: Calculate actual cost
+        self.total_cost += cost
+        return response, cost
+    
+    async def search_web(self, query: str) -> str:
+        """Search web using Perplexity API."""
         if not self.web_client:
-            raise ValueError("Web search is not configured. Set PERPLEXITY_API_KEY environment variable.")
+            logger.warning("Web search not available, returning empty result")
+            return ""
         
         try:
-            max_results = min(max(1, max_results), 20)  # Ensure between 1-20
-            
-            # Make the API request with timeout
             response = await asyncio.get_event_loop().run_in_executor(
                 None,
                 lambda: self.web_client.chat.completions.create(
@@ -126,691 +148,514 @@ class MLEStarAgent(KaggleAgent):
                     temperature=0.7,
                 )
             )
-            
-            # Process the response
-            if not response or not response.choices:
-                self.logger.warning("Empty response from Perplexity API")
-                return []
-                
-            content = response.choices[0].message.content
-            if not content:
-                return []
-            
-            # Return a single result with the full content
-            return [SearchResult(
-                title=query,
-                url="https://perplexity.ai",
-                snippet=content[:5000],  # Limit snippet length
-                source="perplexity"
-            )]
-            
+            if response and response.choices:
+                return response.choices[0].message.content or ""
         except Exception as e:
-            self.logger.error(f"Web search failed: {str(e)}")
-            return []
+            logger.error(f"Web search failed: {str(e)}")
+        return ""
     
-    async def _search_perplexity(self, query: str, max_results: int) -> List[SearchResult]:
-        """
-        Search using Perplexity API.
+    def parse_json_response(self, text: str) -> List[Dict]:
+        """Parse JSON response from LLM."""
+        # Try to extract JSON from markdown code blocks
+        json_match = re.search(r'```(?:json)?\s*(\[.*?\]|\{.*?\})\s*```', text, re.DOTALL)
+        if json_match:
+            text = json_match.group(1)
         
-        Args:
-            query: Search query string
-            max_results: Maximum number of results to return
-            
-        Returns:
-            List of SearchResult objects
-            
-        Raises:
-            Exception: If the search fails
-        """
+        # Try to find JSON in the text
         try:
-            # Make the API request with timeout
-            async with asyncio.timeout(30):  # 30 second timeout
-                response = await asyncio.get_event_loop().run_in_executor(
-                    None,
-                    lambda: self.web_clients['perplexity'].chat.completions.create(
-                        model="sonar-medium-online",
-                        messages=[
-                            {"role": "system", "content": "You are a helpful assistant that performs web searches."},
-                            {"role": "user", "content": query}
-                        ],
-                        max_tokens=2000,
-                        temperature=0.7,
-                    )
-                )
-            
-            # Process the response
-            if not response or not response.choices:
-                self.logger.warning("Empty response from Perplexity API")
-                return []
-                
-            content = response.choices[0].message.content
-            if not content:
-                return []
-            
-            # Parse the response into structured results
+            return json.loads(text)
+        except:
+            # Try to extract JSON-like structures
+            matches = re.findall(r'\{[^{}]*"model_name"[^{}]*"example_code"[^{}]*\}', text)
             results = []
-            for i, line in enumerate(content.split('\n')):
-                if i >= max_results:
-                    break
-                if line.strip():
-                    results.append(SearchResult(
-                        title=f"Result {i+1}",
-                        url=f"#result-{i+1}",
-                        snippet=line.strip(),
-                        source="perplexity"
-                    ))
-            
+            for match in matches:
+                try:
+                    results.append(json.loads(match))
+                except:
+                    pass
             return results
             
-        except asyncio.TimeoutError:
-            return []
-            
-        except Exception as e:
-            self.logger.error(f"Web search failed: {str(e)}")
-            raise
+    # ========== Algorithm 1: Search → Initial Solution ==========
     
-    async def _search_default(self, query: str, max_results: int) -> List[SearchResult]:
+    def algorithm_1_initial_solution(self, exec_callback: ExecCallbackType) -> str:
         """
-        Default search implementation as fallback.
+        Algorithm 1: Generating an initial solution
         
-        Args:
-            query: Search query
-            max_results: Maximum number of results to return
-            
-        Returns:
-            List of SearchResult objects with limited functionality
+        Input: task description T_task, datasets D, score function h, number of retrieved models M
+        1. {T_model_i, T_code_i}_{i=1..M} = A_retriever(T_task)
+        2-5. for i = 1 to M: generate and evaluate s_init_i
+        6-17. Sequential merging: s_0 ← best, then merge others until no improvement
         """
-        self.logger.warning("Using default search implementation - results may be limited")
-        return [
-            SearchResult(
-                title=f"Result {i+1}",
-                url=f"#default-{i+1}",
-                snippet=f"Search result for: {query}",
-                source="default"
-            )
-            for i in range(min(3, max_results))
-        ]
+        M = self.mlestar_cfg.num_models_to_retrieve
+        
+        # Step 1: Retrieve models (A_retriever)
+        logger.info(f"Step 1: Retrieving {M} models...")
+        self.retrieved_models = self._retrieve_models(M)
+        
+        if not self.retrieved_models:
+            logger.warning("No models retrieved, generating default solution")
+            return self._generate_default_solution(exec_callback)
+        
+        # Steps 2-5: Generate and evaluate initial solutions
+        logger.info(f"Step 2-5: Generating and evaluating {len(self.retrieved_models)} solutions...")
+        for i, model in enumerate(self.retrieved_models):
+            logger.info(f"Generating solution {i+1}/{len(self.retrieved_models)}")
+            code = self._generate_initial_solution_from_model(model)
+            if code:
+                result = exec_callback(code)
+                score = self._extract_score(result)
+                self.initial_solutions.append((code, score))
+                logger.info(f"Solution {i+1} score: {score}")
+        
+        if not self.initial_solutions:
+            return self._generate_default_solution(exec_callback)
+        
+        # Steps 6-17: Sequential merging
+        logger.info("Step 6-17: Sequential merging...")
+        # Sort by score (best first)
+        self.initial_solutions.sort(key=lambda x: x[1], reverse=self.higher_is_better)
+        s_0, h_best = self.initial_solutions[0]
+        self.best_solution = s_0
+        self.best_score = h_best
+        
+        # Try merging others
+        for i in range(1, len(self.initial_solutions)):
+            s_candidate_code, s_candidate_score = self.initial_solutions[i]
+            merged_code = self._merge_solutions(s_0, s_candidate_code)
+            if merged_code:
+                result = exec_callback(merged_code)
+                h_candidate = self._extract_score(result)
+                
+                if (self.higher_is_better and h_candidate >= h_best) or \
+                   (not self.higher_is_better and h_candidate <= h_best):
+                    s_0 = merged_code
+                    h_best = h_candidate
+                    self.best_solution = s_0
+                    self.best_score = h_best
+                    logger.info(f"Merged solution {i+1}, new score: {h_best}")
+                else:
+                    logger.info(f"Merged solution {i+1} did not improve, stopping merge")
+                    break
+        
+        return self.best_solution
     
-    async def research_topic(self, topic: str, depth: str = "moderate") -> Dict[str, Any]:
-        """
-        Conduct research on a given topic with configurable depth.
+    def _retrieve_models(self, M: int) -> List[Dict]:
+        """A_retriever: Retrieve M models via web search (Prompt 1)."""
+        query = f"Kaggle competition winning solutions for: {self.task_desc[:200]}"
+        search_result = asyncio.run(self.search_web(query))
         
-        Args:
-            topic: The topic to research
-            depth: Research depth (quick, moderate, deep)
-            
-        Returns:
-            Dictionary containing:
-            - topic: The researched topic
-            - sources: List of source information
-            - summary: AI-generated summary of findings
-            - status: Success/failure status
-        """
-        try:
-            # Generate search queries based on depth
-            queries = self._generate_research_queries(topic, depth)
-            
-            # Execute searches sequentially to avoid rate limiting
-            search_results = []
-            for query in queries:
-                try:
-                    results = await self.search_web(query, max_results=1)
-                    if results:
-                        search_results.extend(results)
-                except Exception as e:
-                    self.logger.warning(f"Search failed for query '{query}': {str(e)}")
-            
-            if not search_results:
-                return {
-                    "topic": topic,
-                    "sources": [],
-                    "summary": "No results found.",
-                    "status": "no_results"
-                }
-            
-            # Analyze and summarize the research
-            analysis = await self._analyze_research(topic, search_results)
-            
-            return {
-                "topic": topic,
-                "sources": [{"title": r.title, "url": r.url} for r in search_results],
-                "summary": analysis.get("summary", "No summary available."),
-                "status": "success"
-            }
-            
-        except Exception as e:
-            self.logger.error(f"Research failed: {str(e)}", exc_info=True)
-            return {
-                "topic": topic,
-                "sources": [],
-                "summary": f"Research failed: {str(e)}",
-                "status": "error"
-            }
+        prompt = prompts.prompt_1_model_retrieval(self.task_desc, M)
+        response, _ = self.query_llm(prompt)
+        
+        models = self.parse_json_response(response)
+        if not models:
+            # Fallback: create dummy models
+            models = [
+                {"model_name": f"Model_{i+1}", "example_code": "# Default model code"}
+                for i in range(M)
+            ]
+        
+        return models[:M]
     
-    async def act(self, obs: Any, action_left: int, time_left: int) -> Tuple[str, Dict]:
-        """
-        Main method called by the environment to get the agent's action.
+    def _generate_initial_solution_from_model(self, model: Dict) -> Optional[str]:
+        """A_init: Generate initial solution from model (Prompt 2)."""
+        model_desc = model.get("model_name", "")
+        example_code = model.get("example_code", "")
         
-        Args:
-            obs: Current observation from the environment
-            action_left: Number of actions remaining
-            time_left: Time remaining in seconds
-            
-        Returns:
-            Tuple of (action_type, action_params)
+        prompt = prompts.prompt_2_initial_solution(
+            self.task_desc,
+            model_desc,
+            example_code
+        )
+        
+        response, _ = self.query_llm(prompt)
+        code = extract_code(response)
+        return code if code else None
+    
+    def _merge_solutions(self, base_code: str, reference_code: str) -> Optional[str]:
+        """A_merger: Merge base and reference solutions (Prompt 3)."""
+        prompt = prompts.prompt_3_merge_solutions(
+            self.task_desc,
+            base_code,
+            reference_code
+        )
+        
+        response, _ = self.query_llm(prompt)
+        code = extract_code(response)
+        return code if code else None
+    
+    def _generate_default_solution(self, exec_callback: ExecCallbackType) -> str:
+        """Generate a default solution if retrieval fails."""
+        prompt = prompts.prompt_2_initial_solution(
+            self.task_desc,
+            "Default baseline model",
+            "# Simple baseline implementation"
+        )
+        response, _ = self.query_llm(prompt)
+        code = extract_code(response)
+        if code:
+            result = exec_callback(code)
+            score = self._extract_score(result)
+            self.best_solution = code
+            self.best_score = score
+            return code
+        return "# Default solution placeholder"
+    
+    # ========== Algorithm 2: Targeted Refinement ==========
+    
+    def algorithm_2_refinement(self, s_0: str, exec_callback: ExecCallbackType) -> str:
         """
-        try:
-            # Initialize task on first action
-            if not self.task_metadata:
-                await self._initialize_task(obs)
+        Algorithm 2: Refining solution
+        
+        Input: initial solution s_0, outer loop steps T, inner loop steps K
+        1-3. Initialize
+        4-28. for t = 0 to T-1:
+            - Ablation study (A_abl)
+            - Summarize (A_summarize)
+            - Extract code block + plan (A_extractor)
+            - Refine code block (A_coder) with K inner iterations
+        """
+        s_final = s_0
+        h_best = self.best_score
+        T = self.mlestar_cfg.refinement_iterations
+        K = self.mlestar_cfg.inner_refinement_steps
+        T_abl = []  # Ablation summaries
+        C = []  # Refined code blocks
+        
+        for t in range(T):
+            logger.info(f"Refinement iteration {t+1}/{T}")
+            s_t = s_final
             
-            # Choose action based on current state
-            if not hasattr(self, 'current_phase'):
-                self.current_phase = 'research'
+            # Step 5: Ablation study
+            ablation_code = self._generate_ablation_study(s_t, T_abl)
+            if ablation_code:
+                ablation_result = exec_callback(ablation_code)
+                ablation_output = ablation_result.get("feedback", {}).get("stdout", "")
+                
+                # Step 7: Summarize ablation
+                ablation_summary = self._summarize_ablation(ablation_code, ablation_output)
+                T_abl.append(ablation_summary)
             
-            if self.current_phase == 'research':
-                return await self._research_phase(obs, action_left, time_left)
-            elif self.current_phase == 'initial_solution':
-                return await self._initial_solution_phase(obs, action_left, time_left)
-            elif self.current_phase == 'refinement':
-                return await self._refinement_phase(obs, action_left, time_left)
-            elif self.current_phase == 'ensembling':
-                return await self._ensembling_phase(obs, action_left, time_left)
+            # Step 8: Extract code block + plan
+            if T_abl:
+                code_block, plan = self._extract_refine_plan(s_t, T_abl[-1], C)
+                if not code_block or not plan:
+                    continue
             else:
-                # Default action if phase is unknown
-                return "noop", {}
+                continue
             
-        except asyncio.CancelledError:
-            self.logger.warning("Research task was cancelled")
-            raise
-        except json.JSONDecodeError as e:
-            self.logger.error(f"Failed to parse observation: {str(e)}")
-            return "request_info", {"info_type": "competition_status"}
+            # Step 9: First refinement (k=0)
+            c_t_0 = self._refine_code_block(code_block, plan)
+            s_t_0 = s_t.replace(code_block, c_t_0)
+            result = exec_callback(s_t_0)
+            h_t_0 = self._extract_score(result)
             
-        except Exception as e:
-            self.logger.error(f"Error in act(): {str(e)}", exc_info=True)
-            return "request_info", {"info_type": "competition_status"}
-        finally:
-            self.iteration += 1
-        return "request_info", {"info_type": "competition_rules"}
-    
-    def _extract_competition_slug(self, obs: Any) -> str:
-        """Extract the competition slug from the observation."""
-        # This is a simplified implementation
-        # In practice, you'd need to parse the observation to get the competition slug
-        return self.config.kaggle.get("competition", "titanic")
-    
-    def _save_solution(self, solution: Dict, prefix: str = "") -> str:
-        """Save the solution to a file."""
-        if not prefix:
-            prefix = "solution"
+            if (self.higher_is_better and h_t_0 >= h_best) or \
+               (not self.higher_is_better and h_t_0 <= h_best):
+                s_final = s_t_0
+                h_best = h_t_0
+                self.best_solution = s_final
+                self.best_score = h_best
             
-        timestamp = time.strftime("%Y%m%d_%H%M%S")
-        filename = f"{prefix}_{timestamp}.json"
-        filepath = self.work_dir / filename
+            # Steps 16-25: Inner loop (k = 1 to K-1)
+            for k in range(1, K):
+                # Step 17: Alternative plan
+                alt_plan = self._suggest_alternative_plan(code_block, self.refinement_plans)
+                if not alt_plan:
+                    break
+                
+                # Step 18: Refine with alternative plan
+                c_t_k = self._refine_code_block(code_block, alt_plan)
+                s_t_k = s_t.replace(code_block, c_t_k)
+                result = exec_callback(s_t_k)
+                h_t_k = self._extract_score(result)
+                
+                if (self.higher_is_better and h_t_k >= h_best) or \
+                   (not self.higher_is_better and h_t_k <= h_best):
+                    s_final = s_t_k
+                    h_best = h_t_k
+                    self.best_solution = s_final
+                    self.best_score = h_best
+                
+                self.refinement_plans.append((alt_plan, h_t_k))
+            
+            # Steps 26-27: Update history
+            C.append(code_block)
         
-        with open(filepath, 'w') as f:
-            json.dump(solution, f, indent=2)
-            
-        logger.info(f"Solution saved to {filepath}")
-        return str(filepath)
+        return s_final
     
-    def _init_llm_client(self) -> Any:
-        """Initialize the LLM client based on configuration."""
-        llm_config = self.llm_config
+    def _generate_ablation_study(self, solution: str, previous_ablations: List[str]) -> Optional[str]:
+        """A_abl: Generate ablation study (Prompt 4)."""
+        prompt = prompts.prompt_4_ablation_study(solution, previous_ablations)
+        response, _ = self.query_llm(prompt)
+        code = extract_code(response)
+        return code if code else None
+    
+    def _summarize_ablation(self, ablation_code: str, raw_result: str) -> str:
+        """A_summarize: Summarize ablation results (Prompt 5)."""
+        prompt = prompts.prompt_5_summarize_ablation(ablation_code, raw_result)
+        response, _ = self.query_llm(prompt)
+        return response
+    
+    def _extract_refine_plan(self, solution: str, ablation_summary: str, prev_blocks: List[str]) -> Tuple[Optional[str], Optional[str]]:
+        """A_extractor: Extract code block and refinement plan (Prompt 6)."""
+        prompt = prompts.prompt_6_extract_refine_plan(solution, ablation_summary, prev_blocks)
+        response, _ = self.query_llm(prompt)
         
-        if llm_config.model_name.startswith("gemini"):
-            try:
-                import google.generativeai as genai
-                genai.configure(api_key=self.api_key)
-                self.gemini_client = genai
-                self.is_experimental_gemini = True
-                logger.info(f"Initialized Gemini client with model: {llm_config.model_name}")
-                return self.gemini_client
-            except ImportError:
-                logger.error("Google Generative AI library not installed. Please install with: pip install google-generativeai")
-                raise
+        # Parse JSON response
+        plans = self.parse_json_response(response)
+        if plans and len(plans) > 0:
+            plan_data = plans[0]
+            code_block = plan_data.get("code_block", "")
+            plan = plan_data.get("plan", "")
+            return code_block, plan
+        
+        # Fallback: extract code block from response
+        code_block = extract_code(response)
+        plan = extract_text_up_to_code(response)
+        return code_block if code_block else None, plan if plan else None
+    
+    def _refine_code_block(self, code_block: str, plan: str) -> str:
+        """A_coder: Refine code block (Prompt 7)."""
+        prompt = prompts.prompt_7_refine_code_block(code_block, plan)
+        response, _ = self.query_llm(prompt)
+        refined = extract_code(response)
+        return refined if refined else code_block
+    
+    def _suggest_alternative_plan(self, code_block: str, prev_plans: List[Tuple[str, float]]) -> Optional[str]:
+        """A_planner: Suggest alternative refinement plan (Prompt 8)."""
+        if not prev_plans:
+            return None
+        
+        plans = [p[0] for p in prev_plans]
+        scores = [p[1] for p in prev_plans]
+        
+        prompt = prompts.prompt_8_alternative_plan(code_block, plans, scores)
+        response, _ = self.query_llm(prompt)
+        plan = extract_text_up_to_code(response)
+        return plan if plan else None
+    
+    # ========== Algorithm 3: Ensemble ==========
+    
+    def algorithm_3_ensemble(self, solutions: List[str], exec_callback: ExecCallbackType) -> str:
+        """
+        Algorithm 3: Ensembling final solutions
+        
+        Input: candidate final solutions s_final^1, ..., s_final^L, ensemble loop steps R
+        1-3. Initial ensemble plan and evaluation
+        4-8. for r = 1 to R-1: alternative ensemble plans
+        9-11. Return best ensemble
+        """
+        L = len(solutions)
+        R = self.mlestar_cfg.ensemble_iterations
+        
+        if L < 2:
+            return solutions[0] if solutions else ""
+        
+        self.ensemble_solutions = solutions
+        
+        # Step 1: Initial ensemble plan
+        ensemble_plan = self._suggest_ensemble_plan(solutions, [])
+        if not ensemble_plan:
+            return solutions[0]
+        
+        # Step 2: Implement ensemble
+        s_ens_0 = self._implement_ensemble(solutions, ensemble_plan)
+        result = exec_callback(s_ens_0)
+        h_ens_0 = self._extract_score(result)
+        
+        best_ensemble = s_ens_0
+        best_score = h_ens_0
+        self.ensemble_plans.append((ensemble_plan, h_ens_0))
+        
+        # Steps 4-8: Alternative ensemble plans
+        for r in range(1, R):
+            ensemble_plan_r = self._suggest_ensemble_plan(solutions, self.ensemble_plans)
+            if not ensemble_plan_r:
+                break
+            
+            s_ens_r = self._implement_ensemble(solutions, ensemble_plan_r)
+            result = exec_callback(s_ens_r)
+            h_ens_r = self._extract_score(result)
+            
+            if (self.higher_is_better and h_ens_r >= best_score) or \
+               (not self.higher_is_better and h_ens_r <= best_score):
+                best_ensemble = s_ens_r
+                best_score = h_ens_r
+            
+            self.ensemble_plans.append((ensemble_plan_r, h_ens_r))
+        
+        return best_ensemble
+    
+    def _suggest_ensemble_plan(self, solutions: List[str], prev_plans: List[Tuple[str, float]]) -> Optional[str]:
+        """A_ens_planner: Suggest ensemble plan (Prompt 9)."""
+        plans = [p[0] for p in prev_plans]
+        scores = [p[1] for p in prev_plans]
+        
+        prompt = prompts.prompt_9_ensemble_plan(solutions, plans, scores)
+        response, _ = self.query_llm(prompt)
+        plan = extract_text_up_to_code(response)
+        return plan if plan else None
+    
+    def _implement_ensemble(self, solutions: List[str], plan: str) -> str:
+        """A_ensembler: Implement ensemble (Prompt 10)."""
+        prompt = prompts.prompt_10_implement_ensemble(solutions, plan)
+        response, _ = self.query_llm(prompt)
+        code = extract_code(response)
+        return code if code else solutions[0]
+    
+    # ========== Validation & Debugging ==========
+    
+    def _debug_code(self, code: str, error: str) -> Optional[str]:
+        """Debug code with error (Prompt 11)."""
+        prompt = prompts.prompt_11_debug(code, error)
+        response, _ = self.query_llm(prompt)
+        fixed_code = extract_code(response)
+        return fixed_code if fixed_code else None
+    
+    def _check_data_leakage(self, code: str) -> Tuple[bool, Optional[str]]:
+        """Check for data leakage (Prompt 12)."""
+        prompt = prompts.prompt_12_check_leakage(code)
+        response, _ = self.query_llm(prompt)
+        
+        answers = self.parse_json_response(response)
+        if answers and len(answers) > 0:
+            answer = answers[0]
+            leakage_status = answer.get("leakage_status", "").lower()
+            code_block = answer.get("code_block", "")
+            has_leakage = "yes" in leakage_status
+            return has_leakage, code_block
+        return False, None
+    
+    def _fix_data_leakage(self, code: str) -> Optional[str]:
+        """Fix data leakage (Prompt 13)."""
+        prompt = prompts.prompt_13_fix_leakage(code)
+        response, _ = self.query_llm(prompt)
+        fixed_code = extract_code(response)
+        return fixed_code if fixed_code else None
+    
+    def _check_data_usage(self, solution: str) -> Optional[str]:
+        """Check if all data is used (Prompt 14)."""
+        prompt = prompts.prompt_14_check_data_usage(solution, self.task_desc)
+        response, _ = self.query_llm(prompt)
+        
+        if "All the provided information is used" in response:
+            return None
+        
+        improved_code = extract_code(response)
+        return improved_code if improved_code else None
+    
+    # ========== Utility Methods ==========
+    
+    def _extract_score(self, exec_result: Dict) -> float:
+        """Extract score from execution result."""
+        if exec_result.get("action_status") == "FAILED":
+            return -float('inf') if self.higher_is_better else float('inf')
+        
+        position_score = exec_result.get("current_position_score", 0.0)
+        return float(position_score)
+    
+    def update_data_preview(self):
+        """Update data preview."""
+        self.data_preview = data_preview.generate(self.cfg.workspace_dir)
+    
+    def step(self, exec_callback: ExecCallbackType):
+        """
+        Main step function - executes one phase of MLE-STAR workflow.
+        
+        This follows the MLE-STAR methodology:
+        1. Algorithm 1: Search → Initial Solution
+        2. Algorithm 2: Targeted Refinement
+        3. Algorithm 3: Ensemble
+        4. Validation & Debugging
+        """
+        if not self.journal.nodes or self.data_preview is None:
+            self.update_data_preview()
+        
+        # Determine current phase
+        if not hasattr(self, '_phase'):
+            self._phase = 'initial'
+        
+        if self._phase == 'initial':
+            logger.info("Phase: Algorithm 1 - Initial Solution")
+            solution = self.algorithm_1_initial_solution(exec_callback)
+            node = Node(
+                code=solution,
+                plan="Initial solution from Algorithm 1",
+                node_type="draft",
+                instruction_prompt="Algorithm 1: Search → Initial Solution"
+            )
+            result = exec_callback(solution)
+            self.parse_exec_result(node, result)
+            self.journal.append(node)
+            self._phase = 'refinement'
+            
+        elif self._phase == 'refinement':
+            logger.info("Phase: Algorithm 2 - Targeted Refinement")
+            if self.best_solution:
+                solution = self.algorithm_2_refinement(self.best_solution, exec_callback)
+                node = Node(
+                    code=solution,
+                    plan="Refined solution from Algorithm 2",
+                    node_type="improve",
+                    instruction_prompt="Algorithm 2: Targeted Refinement"
+                )
+                result = exec_callback(solution)
+                self.parse_exec_result(node, result)
+                self.journal.append(node)
+            self._phase = 'ensemble'
+            
+        elif self._phase == 'ensemble':
+            logger.info("Phase: Algorithm 3 - Ensemble")
+            solutions = [s[0] for s in self.initial_solutions[:3]]  # Top 3 solutions
+            if self.best_solution:
+                solutions.append(self.best_solution)
+            
+            if len(solutions) >= 2:
+                solution = self.algorithm_3_ensemble(solutions, exec_callback)
+                node = Node(
+                    code=solution,
+                    plan="Ensemble solution from Algorithm 3",
+                    node_type="improve",
+                    instruction_prompt="Algorithm 3: Ensemble"
+                )
+                result = exec_callback(solution)
+                self.parse_exec_result(node, result)
+                self.journal.append(node)
+            self._phase = 'validation'
+            
+        elif self._phase == 'validation':
+            logger.info("Phase: Validation & Debugging")
+            if self.best_solution:
+                # Check for data leakage
+                has_leakage, _ = self._check_data_leakage(self.best_solution)
+                if has_leakage:
+                    fixed = self._fix_data_leakage(self.best_solution)
+                    if fixed:
+                        self.best_solution = fixed
+                
+                # Check data usage
+                improved = self._check_data_usage(self.best_solution)
+                if improved:
+                    self.best_solution = improved
+            self._phase = 'done'
+        
         else:
-            # Use the parent class's LLM client
-            return super()._init_llm_client()
+            logger.info("MLE-STAR workflow completed")
     
-    def save_state(self, path: Optional[str] = None) -> str:
-        """Save the agent's state to a file.
-        
-        Args:
-            path: Path to save the state to. If None, uses a default path.
-            
-        Returns:
-            Path to the saved state file
-        """
-        if path is None:
-            path = self.work_dir / f"mle_star_state_{self.iteration}.pkl"
-        
-        state = {
-            'iteration': self.iteration,
-            'best_score': self.best_score,
-            'metrics_history': self.metrics_history,
-            'config': self.config.to_dict() if hasattr(self.config, 'to_dict') else self.config,
-            'conversation_history': self.conversation_history
-        }
-        
-        with open(path, 'wb') as f:
-            import pickle
-            pickle.dump(state, f)
-            
-        logger.info(f"Saved agent state to {path}")
-        return str(path)
-    
-    @classmethod
-    def load_state(cls, path: str, api_idx: int, api_key: str) -> 'MLEStarAgent':
-        """Load an agent from a saved state.
-        
-        Args:
-            path: Path to the saved state file
-            api_idx: API index for the LLM client
-            api_key: API key for the LLM service
-            
-        Returns:
-            Loaded MLEStarAgent instance
-        """
-        with open(path, 'rb') as f:
-            import pickle
-            state = pickle.load(f)
-        
-        # Create a new agent with the saved config
-        config = state.get('config', {})
-        llm_config = LLMConfig(**config.get('llm', {}))
-        
-        agent = cls(
-            api_idx=api_idx,
-            api_key=api_key,
-            llm_config=llm_config,
-            config=config
+    def parse_exec_result(self, node: Node, exec_result: Dict):
+        """Parse execution result and update node."""
+        eval_result = ExecutionResult(
+            status=exec_result["action_status"],
+            feedback=exec_result["feedback"],
+            raw_score=exec_result["current_raw_score"],
+            position_score=exec_result["current_position_score"],
         )
+        node.absorb_exec_result(eval_result)
+        node.analysis = ""
+        node.is_buggy = eval_result.status == "FAILED"
         
-        # Restore state
-        agent.iteration = state.get('iteration', 0)
-        agent.best_score = state.get('best_score', -float('inf'))
-        agent.metrics_history = state.get('metrics_history', [])
-        agent.conversation_history = state.get('conversation_history', [])
-        
-        logger.info(f"Loaded agent state from {path}")
-        return agent
-    
-    def _init_openai_client(self) -> ChatClient:
-        """Initialize OpenAI-compatible chat client."""
-        return ChatClient(
-            model_name=self.config.llm.model_name,
-            model_category=self.config.llm.get('model_category', 'openai'),
-            api_key=self.config.llm.get('api_key', ''),
-            port=self.config.llm.get('port', 8000)
-        )
-    
-    def analyze_task(self, task_description: str, data_summary: Dict) -> Dict:
-        """Analyze the ML task and generate a plan.
-        
-        Args:
-            task_description: Description of the ML task
-            data_summary: Dictionary containing data statistics and metadata
-            
-        Returns:
-            Dictionary containing the analysis and plan
-        """
-        prompt = prompts.get_prompt(
-            'task_analysis_prompt',
-            task_description=task_description,
-            data_summary=yaml.dump(data_summary, default_flow_style=False)
-        )
-        
-        response = self._query_llm(prompt)
-        return {
-            'analysis': response,
-            'plan': self._extract_plan_from_analysis(response)
-        }
-    
-    def generate_code(self, task: Dict, context: Optional[Dict] = None) -> Dict:
-        """Generate code for a given task.
-        
-        Args:
-            task: Dictionary containing task details
-            context: Additional context for code generation
-            
-        Returns:
-            Dictionary containing the generated code and metadata
-        """
-        if context is None:
-            context = {}
-            
-        prompt = prompts.get_prompt(
-            'code_generation_prompt',
-            task_description=task.get('description', ''),
-            requirements='\n'.join([f"- {req}" for req in task.get('requirements', [])]),
-            context=json.dumps(context, indent=2)
-        )
-        
-        response = self._query_llm(prompt)
-        return {
-            'code': self._extract_code_blocks(response),
-            'explanation': self._extract_explanation(response),
-            'metadata': {
-                'task': task,
-                'context': context
-            }
-        }
-    
-    def refine_code(self, code: str, feedback: str) -> Dict:
-        """Refine existing code based on feedback.
-        
-        Args:
-            code: The original code to refine
-            feedback: Feedback or issues to address
-            
-        Returns:
-            Dictionary containing the refined code and explanation
-        """
-        prompt = prompts.get_prompt(
-            'refinement_prompt',
-            code=code,
-            feedback=feedback
-        )
-        
-        response = self._query_llm(prompt)
-        return {
-            'refined_code': self._extract_code_blocks(response),
-            'explanation': self._extract_explanation(response),
-            'original_code': code,
-            'feedback': feedback
-        }
-    
-    def analyze_error(self, error_message: str, code_context: str) -> Dict:
-        """Analyze an error and suggest fixes.
-        
-        Args:
-            error_message: The error message to analyze
-            code_context: The relevant code context
-            
-        Returns:
-            Dictionary containing the analysis and suggested fixes
-        """
-        prompt = prompts.get_prompt(
-            'error_analysis_prompt',
-            error_message=error_message,
-            code_context=code_context
-        )
-        
-        response = self._query_llm(prompt)
-        return {
-            'analysis': response,
-            'suggested_fixes': self._extract_suggested_fixes(response)
-        }
-    
-    def _query_llm(self, prompt: str, **kwargs) -> str:
-        """Query the LLM with the given prompt."""
-        if isinstance(self.llm_client, genai.Client):
-            return self._query_gemini(prompt, **kwargs)
+        if node.is_buggy:
+            node.metric = WorstMetricValue(value=0.0)
         else:
-            return self._query_openai(prompt, **kwargs)
-    
-    def _query_gemini(self, prompt: str, **kwargs) -> str:
-        """Query the Gemini model."""
-        try:
-            response = self.llm_client.models.generate_content(
-                model=self.config.llm.model_name,
-                contents=prompt,
-                **kwargs
-            )
-            return response.text
-        except Exception as e:
-            logger.error(f"Error querying Gemini: {e}")
-            raise
-    
-    def _query_openai(self, prompt: str, **kwargs) -> str:
-        """Query an OpenAI-compatible model."""
-        try:
-            # Add system message if not present
-            messages = [{"role": "system", "content": prompts.system_prompt}]
-            messages.append({"role": "user", "content": prompt})
-            
-            response = self.llm_client.chat_completion(
-                messages=messages,
-                **self.config.llm.to_dict()
-            )
-            return response.choices[0].message.content
-        except Exception as e:
-            logger.error(f"Error querying OpenAI-compatible model: {e}")
-            raise
-    
-    def _extract_code_blocks(self, text: str) -> List[Dict]:
-        """Extract code blocks from markdown text."""
-        import re
-        code_blocks = []
-        pattern = r'```(?:\w+)?\n(.*?)\n```'
-        
-        for match in re.finditer(pattern, text, re.DOTALL):
-            code_blocks.append({
-                'language': 'python',  # Default to Python
-                'code': match.group(1).strip()
-            })
-            
-        return code_blocks
-    
-    def _extract_explanation(self, text: str) -> str:
-        """Extract explanation text from LLM response."""
-        # Simple implementation - can be enhanced
-        return text.split('```')[0].strip()
-    
-    def _extract_plan_from_analysis(self, analysis: str) -> Dict[str, Any]:
-        """Extract structured plan from analysis text.
-        
-        Args:
-            analysis: Raw analysis text from LLM
-            
-        Returns:
-            Dictionary with structured plan containing:
-            - problem_understanding: str
-            - data_preprocessing: List[str]
-            - modeling_approach: List[str]
-            - evaluation: List[str]
-            - next_steps: List[str]
-        """
-        try:
-            # Try to parse as JSON first
-            if analysis.strip().startswith('{') and analysis.strip().endswith('}'):
-                return json.loads(analysis)
-                
-            # Otherwise, extract sections using markdown headers
-            plan = {
-                'problem_understanding': "",
-                'data_preprocessing': [],
-                'modeling_approach': [],
-                'evaluation': [],
-                'next_steps': []
-            }
-            
-            current_section = None
-            
-            for line in analysis.split('\n'):
-                line = line.strip()
-                if not line:
-                    continue
-                    
-                # Check for section headers
-                if line.lower().startswith('## '):
-                    section = line[3:].lower().replace(' ', '_')
-                    if section in plan:
-                        current_section = section
-                    continue
-                        
-                # Add content to current section
-                if current_section:
-                    if current_section == 'problem_understanding':
-                        plan[current_section] += ' ' + line
-                    elif line and line not in plan[current_section]:
-                        plan[current_section].append(line)
-            
-            return plan
-            
-        except Exception as e:
-            logger.warning(f"Failed to parse plan from analysis: {e}")
-            return {
-                'problem_understanding': analysis,
-                'data_preprocessing': [],
-                'modeling_approach': [],
-                'evaluation': [],
-                'next_steps': []
-            }
-    
-    def _extract_suggested_fixes(self, analysis: str) -> List[Dict[str, str]]:
-        """Extract suggested fixes from error analysis.
-        
-        Args:
-            analysis: Raw error analysis text from LLM
-            
-        Returns:
-            List of dictionaries containing:
-            - description: str - Description of the fix
-            - priority: str - Priority level (high/medium/low)
-            - code: Optional[str] - Code snippet if provided
-        """
-        try:
-            # Try to parse as JSON first
-            if analysis.strip().startswith('[') and analysis.strip().endswith(']'):
-                return json.loads(analysis)
-                
-            # Otherwise, extract fixes using markdown formatting
-            fixes = []
-            current_fix = None
-            
-            for line in analysis.split('\n'):
-                line = line.strip()
-                
-                # Look for numbered list items
-                match = re.match(r'^(\d+)[.)]\s*(.*?)(?:\s*\(([^)]+)\))?$', line)
-                if match:
-                    if current_fix:
-                        fixes.append(current_fix)
-                    
-                    priority = 'medium'
-                    if match.group(3):
-                        prio_text = match.group(3).lower()
-                        if 'high' in prio_text:
-                            priority = 'high'
-                        elif 'low' in prio_text:
-                            priority = 'low'
-                    
-                    current_fix = {
-                        'description': match.group(2).strip(),
-                        'priority': priority,
-                        'code': ''
-                    }
-                # Look for code blocks
-                elif line.startswith('```'):
-                    if current_fix and '```' in line[3:]:  # Inline code
-                        current_fix['code'] = line[3:-3].strip()
-                elif current_fix and line and not line.startswith('-'):
-                    # Add to current fix description
-                    current_fix['description'] += ' ' + line
-            
-            # Add the last fix if exists
-            if current_fix:
-                fixes.append(current_fix)
-                
-            return fixes if fixes else [{
-                'description': analysis,
-                'priority': 'high',
-                'code': ''
-            }]
-            
-        except Exception as e:
-            logger.warning(f"Failed to parse suggested fixes: {e}")
-            return [{
-                'description': analysis or 'An unknown error occurred',
-                'priority': 'high',
-                'code': ''
-            }]
-    
-    def save_state(self, path: Optional[str] = None) -> str:
-        """Save the agent's state to a file.
-        
-        Args:
-            path: Path to save the state file. If None, generates a default path.
-            
-        Returns:
-            Path to the saved state file
-        """
-        if path is None:
-            path = str(self.work_dir / f'mle_star_state_{int(time.time())}.pkl')
-            
-        # Ensure directory exists
-        os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
-        
-        state = {
-            'config': asdict(self.config) if hasattr(self.config, '__dataclass_fields__') else self.config,
-            'conversation_history': self.conversation_history,
-            'best_model': self.best_model,
-            'best_score': self.best_score,
-            'iteration': self.iteration,
-            'metrics_history': self.metrics_history,
-            'class_name': self.__class__.__name__,
-            'llm_config': asdict(self.llm_config) if hasattr(self.llm_config, '__dataclass_fields__') else self.llm_config,
-            'api_idx': self.api_idx,
-            'api_key': '***'  # Don't save API key in state
-        }
-        
-        with open(path, 'wb') as f:
-            pickle.dump(state, f, protocol=pickle.HIGHEST_PROTOCOL)
-            
-        logger.info(f"Saved agent state to {path}")
-        return path
-
-    @classmethod
-    def load_state(cls, path: str, api_key: Optional[str] = None) -> 'MLEStarAgent':
-        """Load an agent's state from a file.
-        
-        Args:
-            path: Path to the saved state file
-            api_key: API key for the LLM service. If None, tries to get from environment.
-            
-        Returns:
-            Loaded MLEStarAgent instance
-            
-        Raises:
-            FileNotFoundError: If the state file doesn't exist
-            ValueError: If the state file is invalid or corrupted
-        """
-        try:
-            with open(path, 'rb') as f:
-                state = pickle.load(f)
-                
-            # Get API key from argument or environment
-            api_key = api_key or os.getenv('PERPLEXITY_API_KEY')
-            if not api_key:
-                raise ValueError("API key is required. Either pass it as an argument or set PERPLEXITY_API_KEY environment variable.")
-                
-            # Create agent instance
-            llm_config = LLMConfig(**(state.get('llm_config') or {}))
-            config = state.get('config', {})
-            
-            agent = cls(
-                api_idx=state.get('api_idx', 0),
-                api_key=api_key,
-                llm_config=llm_config,
-                config=config
-            )
-            
-            # Restore state
-            agent.conversation_history = state.get('conversation_history', [])
-            agent.best_model = state.get('best_model')
-            agent.best_score = state.get('best_score', -float('inf'))
-            agent.iteration = state.get('iteration', 0)
-            agent.metrics_history = state.get('metrics_history', [])
-            
-            logger.info(f"Loaded agent state from {path}")
-            return agent
-            
-        except FileNotFoundError:
-            logger.error(f"State file not found: {path}")
-            raise
-        except Exception as e:
-            logger.error(f"Failed to load agent state: {e}")
-            raise ValueError(f"Invalid or corrupted state file: {e}")
+            node.metric = MetricValue(eval_result.position_score, maximize=self.higher_is_better)

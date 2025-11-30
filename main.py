@@ -31,6 +31,7 @@ from mledojo.agent.mleagent.buildup import setup_mle_agent
 from mledojo.agent.openaiagent.buildup import setup_openai_agent
 from mledojo.agent.aide.buildup import setup_aide_agent
 from mledojo.agent.dummy.buildup import setup_dummy_agent
+from mledojo.agent.mlestar.buildup import setup_mlestar_agent
 
 # Environment imports
 from mledojo.gym.env import KaggleEnvironment
@@ -255,6 +256,67 @@ def run_aide_agent(
     logger.info(f"AIDE agent run finished. Best solution metric: {best_node.metric.value}")
 
 
+def run_mlestar_agent(
+    agent: Any,
+    env: KaggleEnvironment,
+    journal: Any,
+    cfg: Any,
+    config: Dict[str, Any]
+) -> None:
+    """
+    Run the MLE-STAR agent.
+    
+    Args:
+        agent: The MLE-STAR agent instance
+        env: The Kaggle environment
+        journal: The journal for tracking experiments
+        cfg: The configuration object
+        config: Main configuration dictionary
+    """
+    # MLE-STAR runs through phases: initial, refinement, ensemble, validation
+    # Each phase can take multiple steps
+    steps = cfg.agent.get('steps', 20)  # Total steps across all phases
+    execution_timeout = config['env']['execution_timeout']
+    
+    # Log model and task information
+    model_name = cfg.agent.code.get('model_name', 'Unknown model')
+    competition_name = config['competition']['name']
+    
+    logger.info(f"Starting MLE-STAR agent run. Model: {model_name}, Competition: {competition_name}")
+    logger.info(f"Total steps: {steps}, Timeout: {execution_timeout}s")
+    
+    start_time = time.time()
+    
+    for i in range(steps):
+        step_num = i + 1
+        logger.info(f"--- MLE-STAR Step {step_num}/{steps} ---")
+        
+        # Check if time limit exceeded before starting step
+        elapsed_time = time.time() - start_time
+        if elapsed_time >= execution_timeout:
+            logger.warning(f"Time limit ({execution_timeout}s) exceeded before step {step_num}.")
+            break
+        
+        # Create a wrapper function to adapt the gym._handle_execute_code output format
+        def exec_callback(code: str) -> Any:
+            """Execute code in the environment and return observation."""
+            obs, reward = env.step("execute_code", **{"code": code})
+            logger.info(f"Reward: {reward}")
+            # Transform the result and reward into the expected format for the agent
+            return obs
+        
+        agent.step(exec_callback=exec_callback)
+        save_run(cfg, journal)
+        
+        # Check if workflow is done
+        if hasattr(agent, '_phase') and agent._phase == 'done':
+            logger.info("MLE-STAR workflow completed")
+            break
+    
+    best_node = journal.get_best_node(only_good=False)
+    logger.info(f"MLE-STAR agent run finished. Best solution metric: {best_node.metric.value}")
+
+
 def run_dummy_agent(
     agent: Any,
     env: KaggleEnvironment,
@@ -396,7 +458,7 @@ def main() -> None:
     parser.add_argument(
         "--agent-type", 
         type=str, 
-        choices=["mle", "openai", "aide", "dummy"], 
+        choices=["mle", "openai", "aide", "mlestar", "dummy"], 
         help="Type of agent to use"
     )
     
@@ -440,6 +502,11 @@ def main() -> None:
             'run': run_aide_agent,
             'name': "AIDE Agent"
         },
+        'mlestar': {
+            'setup': setup_mlestar_agent,
+            'run': run_mlestar_agent,
+            'name': "MLE-STAR Agent"
+        },
         'dummy': {
             'setup': setup_dummy_agent,
             'run': run_dummy_agent,
@@ -454,8 +521,8 @@ def main() -> None:
     handler = agent_handlers[agent_type]
     logger.info(f"Selected agent type: {handler['name']} ({agent_type})")
     
-    # Special case for AIDE agent
-    if agent_type == 'aide':
+    # Special case for AIDE and MLE-STAR agents (similar pattern)
+    if agent_type in ['aide', 'mlestar']:
         agent, journal, cfg = handler['setup'](config)
         config['output_dir'] = cfg.workspace_dir
         env = setup_environment(config)
