@@ -70,6 +70,26 @@ def initialize_scores_csv(csv_file: str) -> None:
     logger.info(f"Initialized scores tracking CSV: {csv_file}")
 
 
+def initialize_prompts_csv(csv_file: str) -> None:
+    """Initialize CSV file for logging prompts."""
+    with open(csv_file, 'w', newline='') as f:
+        writer = csv.writer(f)
+        writer.writerow(['iteration', 'role', 'content', 'timestamp'])
+    logger.info(f"Initialized prompts tracking CSV: {csv_file}")
+
+
+def log_prompts_to_csv(csv_file: str, iteration: int, messages: list) -> None:
+    """Log prompts/messages to CSV file."""
+    with open(csv_file, 'a', newline='') as f:
+        writer = csv.writer(f)
+        timestamp = time.time()
+        for msg in messages:
+            if isinstance(msg, dict) and 'role' in msg and 'content' in msg:
+                # Truncate long content to avoid CSV issues
+                content = str(msg['content'])[:10000] if len(str(msg['content'])) > 10000 else str(msg['content'])
+                writer.writerow([iteration, msg['role'], content, timestamp])
+
+
 def log_score_to_csv(csv_file: str, iteration: int, position_score: Any) -> None:
     """Log iteration and position_score to CSV file."""
     with open(csv_file, 'a', newline='') as f:
@@ -80,7 +100,7 @@ def log_score_to_csv(csv_file: str, iteration: int, position_score: Any) -> None
 async def run_openai_agent(
     agent: Any,
     env: KaggleEnvironment,
-    output_files: Tuple[str, str, str, str],
+    output_files: Tuple[str, str, str, str, str],
     config: Dict[str, Any]
 ) -> None:
     """
@@ -90,11 +110,12 @@ async def run_openai_agent(
         agent: The OpenAI agent instance
         env: The Kaggle environment
         output_files: Tuple of file paths for saving agent history
-                     (trajectory_file, fix_parse_error_file, cost_history_file, scores_csv_file)
+                     (trajectory_file, fix_parse_error_file, cost_history_file, scores_csv_file, prompts_csv_file)
         config: Configuration dictionary containing execution parameters
     """
-    trajectory_file, fix_parse_error_file, cost_history_file, scores_csv_file = output_files
+    trajectory_file, fix_parse_error_file, cost_history_file, scores_csv_file, prompts_csv_file = output_files
     initialize_scores_csv(scores_csv_file)
+    initialize_prompts_csv(prompts_csv_file)
     action_left = config['env']['max_steps']
     execution_timeout = config['env']['execution_timeout']
     obs = None
@@ -135,6 +156,10 @@ async def run_openai_agent(
         
         with open(cost_history_file, 'w') as f:
             json.dump(agent.cost_history, f, indent=4)
+        
+        # Log prompts to CSV
+        if hasattr(agent, 'history_to_save') and agent.history_to_save:
+            log_prompts_to_csv(prompts_csv_file, step_num, agent.history_to_save)
             
         obs, reward = env.step(action, **params)
         logger.info(f"Step {step_num}: Environment step executed. Reward: {reward}")
@@ -154,7 +179,7 @@ async def run_openai_agent(
 def run_mle_agent(
     agent: Any,
     env: KaggleEnvironment,
-    output_files: Tuple[str, str, str, str],
+    output_files: Tuple[str, str, str, str, str],
     config: Dict[str, Any]
 ) -> None:
     """
@@ -164,11 +189,12 @@ def run_mle_agent(
         agent: The MLE agent instance
         env: The Kaggle environment
         output_files: Tuple of file paths for saving agent history
-                     (trajectory_file, fix_parse_error_file, cost_history_file, scores_csv_file)
+                     (trajectory_file, fix_parse_error_file, cost_history_file, scores_csv_file, prompts_csv_file)
         config: Configuration dictionary containing execution parameters
     """
-    trajectory_file, fix_parse_error_file, cost_history_file, scores_csv_file = output_files
+    trajectory_file, fix_parse_error_file, cost_history_file, scores_csv_file, prompts_csv_file = output_files
     initialize_scores_csv(scores_csv_file)
+    initialize_prompts_csv(prompts_csv_file)
     action_left = config['env']['max_steps']
     execution_timeout = config['env']['execution_timeout']
     obs = None
@@ -209,6 +235,10 @@ def run_mle_agent(
         
         with open(cost_history_file, 'w') as f:
             json.dump(agent.cost_history, f, indent=4)
+        
+        # Log prompts to CSV
+        if hasattr(agent, 'conversation_history') and agent.conversation_history:
+            log_prompts_to_csv(prompts_csv_file, step_num, agent.conversation_history)
             
         obs, reward = env.step(action, **params)
         logger.info(f"Step {step_num}: Environment step executed. Reward: {reward}")
@@ -231,7 +261,8 @@ def run_aide_agent(
     journal: Any,
     cfg: Any,
     config: Dict[str, Any],
-    scores_csv_file: str = None
+    scores_csv_file: str = None,
+    prompts_csv_file: str = None
 ) -> None:
     """
     Run the AIDE agent.
@@ -243,9 +274,12 @@ def run_aide_agent(
         cfg: The AIDE configuration object
         config: Main configuration dictionary
         scores_csv_file: Path to CSV file for logging scores
+        prompts_csv_file: Path to CSV file for logging prompts
     """
     if scores_csv_file:
         initialize_scores_csv(scores_csv_file)
+    if prompts_csv_file:
+        initialize_prompts_csv(prompts_csv_file)
     
     steps = cfg.agent.get('steps', 20)
     execution_timeout = config['env']['execution_timeout']
@@ -279,6 +313,10 @@ def run_aide_agent(
             if scores_csv_file:
                 log_score_to_csv(scores_csv_file, step_num, reward)
             
+            # Log prompts to CSV if available
+            if prompts_csv_file and hasattr(agent, 'conversation_history') and agent.conversation_history:
+                log_prompts_to_csv(prompts_csv_file, step_num, agent.conversation_history)
+            
             # Transform the result and reward into the expected format for the agent
             return obs
         
@@ -292,7 +330,7 @@ def run_aide_agent(
 def run_dummy_agent(
     agent: Any,
     env: KaggleEnvironment,
-    output_files: Tuple[str, str, str, str],
+    output_files: Tuple[str, str, str, str, str],
     config: Dict[str, Any]
 ) -> None:
     """
@@ -302,11 +340,12 @@ def run_dummy_agent(
         agent: The Dummy agent instance
         env: The Kaggle environment
         output_files: Tuple of file paths for saving agent history
-                     (trajectory_file, fix_parse_error_file, cost_history_file, scores_csv_file)
+                     (trajectory_file, fix_parse_error_file, cost_history_file, scores_csv_file, prompts_csv_file)
         config: Configuration dictionary containing execution parameters
     """
-    trajectory_file, fix_parse_error_file, cost_history_file, scores_csv_file = output_files
+    trajectory_file, fix_parse_error_file, cost_history_file, scores_csv_file, prompts_csv_file = output_files
     initialize_scores_csv(scores_csv_file)
+    initialize_prompts_csv(prompts_csv_file)
     action_left = config['env']['max_steps']
     execution_timeout = config['env']['execution_timeout']
     obs = None
@@ -344,6 +383,10 @@ def run_dummy_agent(
         if hasattr(agent, 'cost_history'):
             with open(cost_history_file, 'w') as f:
                 json.dump(agent.cost_history, f, indent=4)  
+        
+        # Log prompts to CSV if available
+        if hasattr(agent, 'conversation_history') and agent.conversation_history:
+            log_prompts_to_csv(prompts_csv_file, step_num, agent.conversation_history)
 
         obs, reward = env.step(action, **params)
         logger.info(f"Step {step_num}: Environment step executed. Reward: {reward}")
@@ -498,8 +541,9 @@ def main() -> None:
         config['output_dir'] = cfg.workspace_dir
         env = setup_environment(config)
         
-        # Set up CSV file path
+        # Set up CSV file paths
         scores_csv_file = os.path.join(config['output_dir'], 'scores.csv')
+        prompts_csv_file = os.path.join(config['output_dir'], 'prompts.csv')
         
         # Run agent with timeout
         logger.info(f"Running with timeout of {execution_timeout} seconds")
@@ -507,7 +551,7 @@ def main() -> None:
         timeout_handler(
             execution_timeout,
             handler['run'],
-            agent, env, journal, cfg, config, scores_csv_file
+            agent, env, journal, cfg, config, scores_csv_file, prompts_csv_file
         )
     # Special case for OpenAI agent (async)
     elif agent_type == 'openai':
@@ -517,7 +561,8 @@ def main() -> None:
         # Set up history directories
         _, trajectory_file, fix_parse_error_file, cost_history_file = setup_agent_history_dir(str(config['output_dir']))
         scores_csv_file = os.path.join(config['output_dir'], 'scores.csv')
-        output_files = (trajectory_file, fix_parse_error_file, cost_history_file, scores_csv_file)
+        prompts_csv_file = os.path.join(config['output_dir'], 'prompts.csv')
+        output_files = (trajectory_file, fix_parse_error_file, cost_history_file, scores_csv_file, prompts_csv_file)
         
         # Run agent asynchronously with timeout
         asyncio.run(run_openai_with_timeout(agent, env, output_files, config, execution_timeout))
@@ -529,7 +574,8 @@ def main() -> None:
         # Set up history directories
         _, trajectory_file, fix_parse_error_file, cost_history_file = setup_agent_history_dir(str(config['output_dir']))
         scores_csv_file = os.path.join(config['output_dir'], 'scores.csv')
-        output_files = (trajectory_file, fix_parse_error_file, cost_history_file, scores_csv_file)
+        prompts_csv_file = os.path.join(config['output_dir'], 'prompts.csv')
+        output_files = (trajectory_file, fix_parse_error_file, cost_history_file, scores_csv_file, prompts_csv_file)
         
         # Run agent with timeout
         logger.info(f"Running with timeout of {execution_timeout} seconds")
