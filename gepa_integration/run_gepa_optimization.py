@@ -202,7 +202,7 @@ def main():
         logger.warning("3. Handle iteration logging with gepa_logger")
         logger.warning("4. Save best candidate prompts")
         
-        Placeholder for gepa.optimize call:
+        # Placeholder for gepa.optimize call:
         result = gepa.optimize(
              seed_candidate=seed_candidate,
              trainset=trainset,
