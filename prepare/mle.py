@@ -7,6 +7,7 @@ import sys
 import traceback
 import shutil
 import argparse
+import glob
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Prepare competition data')
@@ -68,7 +69,33 @@ def prepare_competition(competition_name, data_dir, logs_dir):
         extract(raw_data_dir / f"{competition_name}.zip", raw_data_dir)
         print("Preparing data...")
         prepare = get_prepare(competition_name)
-        prepare(raw_data_dir, public_data_dir, private_data_dir)
+        
+        if prepare is not None:
+            # Use custom prepare function
+            print(f"Using custom prepare function for {competition_name}")
+            prepare(raw_data_dir, public_data_dir, private_data_dir)
+        else:
+            # No custom prepare function - use default behavior
+            print(f"No custom prepare function found for {competition_name}, using default file copying")
+            
+            # Copy CSV files from raw to public directory
+            import glob
+            csv_files = glob.glob(str(raw_data_dir / "*.csv"))
+            
+            if not csv_files:
+                print(f"Warning: No CSV files found in {raw_data_dir}")
+            
+            for csv_file in csv_files:
+                csv_path = Path(csv_file)
+                dest_path = public_data_dir / csv_path.name
+                shutil.copy2(csv_path, dest_path)
+                print(f"Copied {csv_path.name} to {public_data_dir}")
+            
+            # Also copy sample_submission.csv to private if it exists (for evaluation)
+            sample_submission = raw_data_dir / "sample_submission.csv"
+            if sample_submission.exists():
+                shutil.copy2(sample_submission, private_data_dir / "sample_submission.csv")
+                print(f"Copied sample_submission.csv to {private_data_dir}")
 
         # Use project root to find competition files
         mle_dojo_comp_dir = project_root / "mledojo" / "competitions" / competition_name
