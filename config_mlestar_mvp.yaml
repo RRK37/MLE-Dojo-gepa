@@ -45,7 +45,7 @@ agent:
   # LLM Configuration
   # ========================================================================
   model_mode: "openai"  # Options: claude, openai, gemini, gpt
-  model_name: "gpt-5"  # Upgraded to GPT-5 for better performance
+  model_name: "gpt-4o-mini"  # Fast and cost-effective model
   # Alternative models:
   #   - "gpt-4o-mini" (faster, cheaper)
   #   - "gpt-4o" (better quality)

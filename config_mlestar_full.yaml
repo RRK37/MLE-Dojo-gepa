@@ -26,7 +26,7 @@ agent_type: "mlestar"
 agent:
   # LLM Configuration
   model_mode: "openai"  # Options: claude, openai, gemini
-  model_name: "gpt-5"  # Upgraded to GPT-5 for better performance
+  model_name: "gpt-4o-mini"  # Fast and cost-effective model
   max_completion_tokens: 8192
   max_prompt_tokens: 30000
   api_idx: 0

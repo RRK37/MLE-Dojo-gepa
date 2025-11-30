@@ -27,9 +27,8 @@ Model = {{'model_name': str, 'example_code': str}}
 Return: list[Model]"""
 
     @staticmethod
-    def prompt_2_initial_solution(task_description: str, model_description: str, example_code: str, data_dir: str, available_packages: str = "", data_preview: str = "") -> str:
+    def prompt_2_initial_solution(task_description: str, model_description: str, example_code: str, data_dir: str, available_packages: str = "") -> str:
         """Prompt 2: Generate initial solution from model."""
-        data_overview = f"\n# Data Overview:\n{data_preview}\n" if data_preview else ""
         return f"""# Introduction
 - You are a Kaggle grandmaster attending a competition.
 - We will now provide a task description and a model description.
@@ -44,15 +43,13 @@ Return: list[Model]"""
 
 ## Example Python code
 {example_code}
-{data_overview}
+
 # Your task
 - Implement the solution in Python.
 - You must use the model as described in the model description.
 - This first solution design should be relatively simple, without ensembling or hyper-parameter optimization.
 - Propose an evaluation metric that is reasonable for this task.
 - The data is already prepared and available in the `./input` directory. There is no need to unzip any files.
-- You should load training data from CSV files in the `./input` directory (e.g., `train.csv`, `train.parquet`, or similar files).
-- Use `pandas.read_csv()` or `pd.read_parquet()` to load the data files. Check the directory structure first if needed.
 - Do not include other models that are not directly related to the model described.
 - {available_packages}
 - The code should implement the proposed solution and print the value of the evaluation metric computed on a hold-out validation set.
@@ -68,9 +65,8 @@ Return: list[Model]"""
 - Do not use try: and except: or if else to ignore unintended behavior."""
 
     @staticmethod
-    def prompt_3_merge_solutions(task_description: str, base_code: str, reference_code: str, data_dir: str, available_packages: str = "", data_preview: str = "") -> str:
+    def prompt_3_merge_solutions(task_description: str, base_code: str, reference_code: str, data_dir: str, available_packages: str = "") -> str:
         """Prompt 3: Merge base and reference solutions."""
-        data_overview = f"\n# Data Overview:\n{data_preview}\n" if data_preview else ""
         return f"""# Introduction
 - You are a Kaggle grandmaster attending a competition.
 - We will now provide a base solution and an additional reference solution.
@@ -81,7 +77,7 @@ Return: list[Model]"""
 
 # Reference solution
 {reference_code}
-{data_overview}
+
 # Your task
 - Implement the solution in Python.
 - You have to integrate the reference solution to the base solution.
@@ -91,8 +87,6 @@ Return: list[Model]"""
 - When integrating, ensemble the models.
 - The solution design should be relatively simple.
 - The data is already prepared and available in the `./input` directory. There is no need to unzip any files.
-- You should load training data from CSV files in the `./input` directory (e.g., `train.csv`, `train.parquet`, or similar files).
-- Use `pandas.read_csv()` or `pd.read_parquet()` to load the data files. Check the directory structure first if needed.
 - {available_packages}
 - The code should implement the proposed solution and print the value of the evaluation metric computed on a hold-out validation set.
 - Only use the provided train data in the `./input` directory. Do not load test data.
@@ -284,8 +278,6 @@ Return: list[Refine_Plan]"""
 - Implement the ensemble plan with the provided solutions.
 - Unless mentioned in the ensemble plan, do not modify the original Python Solutions too much."
 - The data is already prepared and available in the `./input` directory. There is no need to unzip any files.
-- You should load training data from CSV files in the `./input` directory (e.g., `train.csv`, `train.parquet`, or similar files).
-- Use `pandas.read_csv()` or `pd.read_parquet()` to load the data files. Check the directory structure first if needed.
 - {available_packages}
 - All the provided data (except previous submissions; do not load submissions) is already prepared and available in the `./input` directory.
 - The code should implement the proposed solution and print the value of the evaluation metric computed on a hold-out validation set.
@@ -327,8 +319,6 @@ Return: list[Refine_Plan]"""
 - {available_packages}
 - There should be no additional headings or text in your response.
 - All the provided input data is stored in the `./input` directory.
-- You should load training data from CSV files in the `./input` directory (e.g., `train.csv`, `train.parquet`, or similar files).
-- Use `pandas.read_csv()` or `pd.read_parquet()` to load the data files. Check the directory structure first if needed using `os.listdir('./input')` or `glob.glob('./input/*.csv')`.
 - Remember to print a line in the code with 'Final Validation Performance: {{final_validation_score}}' so we can parse performance.
 - The code should be a single-file python program that is self-contained and can be executed as-is.
 - Your response should only contain a single code block.
