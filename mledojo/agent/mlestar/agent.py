@@ -13,6 +13,7 @@ import tiktoken
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from openai import OpenAI
+import random
 
 from mledojo.agent.aide.journal import Journal, Node, ExecutionResult
 from mledojo.agent.aide.utils.config import Config
