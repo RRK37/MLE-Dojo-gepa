@@ -11,15 +11,24 @@ import matplotlib
 import os
 
 # Set backend based on environment (headless vs display)
-if os.environ.get('DISPLAY') is None and os.name != 'nt':
-    # Headless environment (Linux without display)
-    matplotlib.use('Agg')
-else:
-    # Environment with display
-    try:
-        matplotlib.use('TkAgg')
-    except ImportError:
+# Check if we're in a Jupyter/IPython environment (notebooks, Colab, HF Spaces)
+try:
+    get_ipython().__class__.__name__
+    # We're in IPython/Jupyter - use inline backend
+    matplotlib.use('module://matplotlib_inline.backend_inline')
+    _IN_NOTEBOOK = True
+except (NameError, AttributeError):
+    _IN_NOTEBOOK = False
+    # Not in notebook - check for display
+    if os.environ.get('DISPLAY') is None and os.name != 'nt':
+        # Headless environment (Linux without display)
         matplotlib.use('Agg')
+    else:
+        # Environment with display
+        try:
+            matplotlib.use('TkAgg')
+        except ImportError:
+            matplotlib.use('Agg')
 
 import matplotlib.pyplot as plt
 
@@ -429,10 +438,16 @@ REMEMBER: You MUST create submission.csv in EVERY iteration. Without it, your sc
     def _setup_live_plot(self):
         """Initialize the live plotting window with dark theme and pink/green styling."""
         # Check if we're in headless mode
-        if matplotlib.get_backend() == 'Agg':
+        backend = matplotlib.get_backend()
+        if backend == 'Agg':
             print("[Adapter] Live plotting disabled (headless environment)")
+            print("[Adapter] Plots will be saved to files in journal_logs/")
             self.enable_live_plot = False
             return
+        
+        # In notebook environments, we'll save plot images and update them
+        if 'inline' in backend.lower():
+            print("[Adapter] Notebook environment detected - plots will update as images")
         
         plt.ion()  # Enable interactive mode
         plt.style.use('dark_background')
@@ -440,7 +455,7 @@ REMEMBER: You MUST create submission.csv in EVERY iteration. Without it, your sc
         self.fig, self.ax = plt.subplots(figsize=(12, 6))
         try:
             self.fig.canvas.manager.set_window_title('Journal Node Scores - Live')
-        except AttributeError:
+        except (AttributeError, TypeError):
             pass  # Some backends don't support window titles
         
         self.ax.set_xlabel('Node ID', fontsize=12, fontweight='bold')
@@ -449,8 +464,13 @@ REMEMBER: You MUST create submission.csv in EVERY iteration. Without it, your sc
         self.ax.grid(True, alpha=0.3, linestyle='--')
         
         plt.tight_layout()
-        plt.show(block=False)
-        plt.pause(0.1)
+        
+        # Display method varies by backend
+        try:
+            plt.show(block=False)
+            plt.pause(0.1)
+        except Exception as e:
+            print(f"[Adapter] Could not display live plot: {e}")
     
     def _update_live_plot(self, journal):
         """Update the live plot with current journal data."""
@@ -500,10 +520,30 @@ REMEMBER: You MUST create submission.csv in EVERY iteration. Without it, your sc
         self.ax.legend(loc='best', framealpha=0.9)
         self.ax.grid(True, alpha=0.3, linestyle='--')
         
-        # Refresh the plot
-        self.fig.canvas.draw()
-        self.fig.canvas.flush_events()
-        plt.pause(0.01)
+        # Refresh the plot (method varies by backend)
+        try:
+            self.fig.canvas.draw()
+            self.fig.canvas.flush_events()
+            plt.pause(0.01)
+        except Exception:
+            # In some environments, just saving is sufficient
+            pass
+        
+        # For notebook environments, also save to a file that updates
+        backend = matplotlib.get_backend()
+        if 'inline' in backend.lower():
+            logs_dir = Path(self.output_dir) / "journal_logs"
+            logs_dir.mkdir(parents=True, exist_ok=True)
+            live_plot_path = logs_dir / "live_plot.png"
+            self.fig.savefig(live_plot_path, dpi=150, facecolor='#1e1e1e', edgecolor='none')
+            
+            # In Jupyter, trigger display update
+            try:
+                from IPython.display import clear_output, display
+                clear_output(wait=True)
+                display(self.fig)
+            except ImportError:
+                pass
     
     def _save_journal_data(self, journal, episode_idx: int):
         """
