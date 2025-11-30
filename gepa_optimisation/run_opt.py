@@ -9,7 +9,7 @@ sys.path.append(project_root)
 
 # 2. Imports
 from gepa import optimize
-from gepa.config import OptimizerConfig
+from gepa import OptimizerConfig
 from gepa_optimization.adapter import MLEDojoGEPAAdapter
 
 # Import your agent and its dependencies
