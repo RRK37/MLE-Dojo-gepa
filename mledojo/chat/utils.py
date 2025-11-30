@@ -21,13 +21,13 @@ class ModelSettings:
     Attributes:
         max_completion_tokens (int): Maximum number of tokens allowed for the model's generated completion.
         temperature (float): Sampling temperature for token generation (default: 0.0).
-        top_p (float): Nucleus sampling parameter (default: 1.0).
+        top_p (float): Nucleus sampling parameter (default: None, only used if explicitly set).
         frequency_penalty (float): Penalty applied based on token frequency (default: 0.0).
         presence_penalty (float): Penalty applied to encourage new token appearances (default: 0.0).
     """
     max_completion_tokens: int
     temperature: float = 0.0
-    top_p: float = 1.0
+    top_p: float | None = None
     frequency_penalty: float = 0.0
     presence_penalty: float = 0.0
 

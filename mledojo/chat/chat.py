@@ -228,8 +228,11 @@ class ChatClient:
                         "messages": claude_messages,
                         "max_tokens": settings.max_completion_tokens,
                         "temperature": settings.temperature,
-                        "top_p": settings.top_p,
                     }
+                    
+                    # Only add top_p if explicitly set (Claude doesn't allow both temperature and top_p)
+                    if settings.top_p is not None:
+                        request_params["top_p"] = settings.top_p
                     
                     # Add system message if present
                     if system_message:

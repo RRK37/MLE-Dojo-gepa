@@ -33,7 +33,7 @@ class StageConfig:
     api_idx: int
     api_key: str | None
     temperature: float = 0.0
-    top_p: float = 1.0
+    top_p: float | None = None
 
 
 @dataclass
