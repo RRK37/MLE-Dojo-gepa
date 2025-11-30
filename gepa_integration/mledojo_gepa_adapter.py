@@ -225,28 +225,31 @@ class MLEDojoGEPAAdapter:
             'trajectory': trajectory
         }
     
-    def _prepare_config(self, comp_config: CompetitionConfig) -> Dict[str, Any]:
+def _prepare_config(self, comp_config: CompetitionConfig) -> Dict[str, Any]:
         """Prepare configuration dict for AIDE agent"""
         config = self.base_config.copy()
         
-        # FIX: Construct the correct path including the competition name
-        # Structure: data/prepared/<comp_name>
+        # 1. Define the specific competition root directory
+        # This assumes your data is at: ./data/prepared/<competition_name>
         comp_root_dir = os.path.join(comp_config.data_dir, comp_config.name)
         
-        # Update with competition-specific settings
+        # 2. Update the config to point to this specific folder
         config['competition']['name'] = comp_config.name
         config['competition']['data_dir'] = comp_root_dir
         
-        # FIX: Point strictly to the description file location you confirmed
+        # 3. Explicitly set the description file path WITH 'data' FOLDER
         # Structure: data/prepared/<comp_name>/data/public/description.txt
         desc_path = os.path.join(comp_root_dir, "data", "public", "description.txt")
         
+        # Verify it exists before passing it to the agent
         if os.path.exists(desc_path):
             config['desc_file'] = desc_path
         else:
-            config['desc_file'] = None
-            # Log exact path we tried so we can debug if it fails again
-            logger.error(f"Description file NOT FOUND at: {desc_path}")
+            # If we can't find it, log clearly where we looked
+            logger.error(f"FILE MISSING: Expected description at {desc_path}")
+            # Do NOT set it to None if you want to avoid AIDE guessing the wrong path.
+            # But if it's missing, the agent will likely fail anyway.
+            config['desc_file'] = desc_path 
             
         config['env']['max_steps'] = comp_config.max_steps
         config['env']['execution_timeout'] = comp_config.execution_timeout
