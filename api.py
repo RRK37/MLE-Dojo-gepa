@@ -124,12 +124,34 @@ class DataStreamer:
                 
                 output = line.decode('utf-8', errors='replace').rstrip()
                 if output:
-                    await self.broadcast({
-                        "type": "command_output",
-                        "command_id": command_id,
-                        "output": output,
-                        "timestamp": asyncio.get_event_loop().time()
-                    })
+                    # Check if this is node data
+                    if output.startswith("NODE_DATA:"):
+                        try:
+                            node_json = output[len("NODE_DATA:"):]
+                            node_data = json.loads(node_json)
+                            await self.broadcast({
+                                "type": "node_data",
+                                "command_id": command_id,
+                                "node": node_data,
+                                "timestamp": asyncio.get_event_loop().time()
+                            })
+                        except json.JSONDecodeError as e:
+                            logger.warning(f"Failed to parse node data: {e}, line: {output}")
+                            # Still send as regular output
+                            await self.broadcast({
+                                "type": "command_output",
+                                "command_id": command_id,
+                                "output": output,
+                                "timestamp": asyncio.get_event_loop().time()
+                            })
+                    else:
+                        # Regular output
+                        await self.broadcast({
+                            "type": "command_output",
+                            "command_id": command_id,
+                            "output": output,
+                            "timestamp": asyncio.get_event_loop().time()
+                        })
             
             # Wait for process to complete
             return_code = await process.wait()

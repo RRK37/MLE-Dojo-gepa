@@ -322,7 +322,26 @@ def run_aide_agent(
         
         agent.step(exec_callback=exec_callback)
         save_run(cfg, journal)
-
+        
+        # Stream node data after each step
+        if journal.nodes:
+            latest_node = journal.nodes[-1]
+            node_data = {
+                "step": latest_node.step,
+                "iteration": latest_node.step,
+                "code": latest_node.code,
+                "status": latest_node.status,
+                "reward": latest_node.position_score if latest_node.position_score is not None else 0.0,
+                "parent_id": latest_node.parent.id if latest_node.parent else None,
+                "node_id": latest_node.id,
+                "is_buggy": latest_node.is_buggy,
+                "raw_score": latest_node.raw_score,
+                "node_type": latest_node.node_type,
+                "stage_name": latest_node.stage_name
+            }
+            # Output in a format that can be parsed by the API
+            print(f"NODE_DATA:{json.dumps(node_data)}", flush=True)
+        
     best_node = journal.get_best_node(only_good=False)
     logger.info(f"AIDE agent run finished. Best solution metric: {best_node.metric.value}")
 

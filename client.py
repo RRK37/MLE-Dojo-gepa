@@ -100,6 +100,30 @@ class APIClient:
             print(f"   Command ID: {command_id}")
             print("-" * 80)
         
+        elif msg_type == "node_data":
+            node = data.get("node", {})
+            step = node.get("step", node.get("iteration", "?"))
+            node_id = node.get("node_id", "unknown")
+            code = node.get("code", "")
+            status = node.get("status", "unknown")
+            reward = node.get("reward", 0.0)
+            parent_id = node.get("parent_id")
+            is_buggy = node.get("is_buggy", False)
+            node_type = node.get("node_type", "unknown")
+            stage_name = node.get("stage_name", "unknown")
+            
+            print(f"\n{'='*80}")
+            print(f"[{time_str}] 🌳 NODE UPDATE - Step {step}")
+            print(f"{'='*80}")
+            print(f"  Node ID:      {node_id}")
+            print(f"  Parent ID:    {parent_id if parent_id else 'None (root)'}")
+            print(f"  Stage:        {stage_name} ({node_type})")
+            print(f"  Status:       {status}")
+            print(f"  Reward:       {reward:.6f}")
+            print(f"  Is Buggy:     {'Yes' if is_buggy else 'No'}")
+            print(f"  Code Preview: {code[:200]}{'...' if len(code) > 200 else ''}")
+            print(f"{'='*80}\n")
+        
         elif msg_type == "command_output":
             output = data.get("output", "")
             if output:
