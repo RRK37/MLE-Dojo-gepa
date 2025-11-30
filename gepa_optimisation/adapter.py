@@ -3,6 +3,13 @@ from typing import Callable, Any
 from mledojo.gym.env import KaggleEnvironment
 from mledojo.gym.competition import CompetitionRegistry, CompInfo
 from mledojo.competitions import get_metric
+import json
+import csv
+from pathlib import Path
+from datetime import datetime
+import matplotlib.pyplot as plt
+import matplotlib
+matplotlib.use('TkAgg')  # Use interactive backend
 
 class MLEDojoGEPAAdapter(GEPAAdapter):
     def __init__(self, 
@@ -12,7 +19,8 @@ class MLEDojoGEPAAdapter(GEPAAdapter):
                  agent_factory: Callable[[str], Any], 
                  max_steps: int = 10,
                  execution_timeout: int = 600,
-                 score_mode: str = "position"):
+                 score_mode: str = "position",
+                 enable_live_plot: bool = True):
         """
         Args:
             competition_name: The Kaggle competition name (e.g., 'titanic').
@@ -22,6 +30,7 @@ class MLEDojoGEPAAdapter(GEPAAdapter):
             max_steps: Safety limit for agent iterations per episode.
             execution_timeout: Timeout for code execution in seconds.
             score_mode: Scoring mode ('position' or 'raw').
+            enable_live_plot: Whether to enable live plotting of journal nodes.
         """
         self.competition_name = competition_name
         self.data_dir = data_dir
@@ -30,6 +39,15 @@ class MLEDojoGEPAAdapter(GEPAAdapter):
         self.max_steps = max_steps
         self.execution_timeout = execution_timeout
         self.score_mode = score_mode
+        self.enable_live_plot = enable_live_plot
+        
+        # Live plotting state
+        self.fig = None
+        self.ax = None
+        self.plot_data = {'node_ids': [], 'scores': [], 'buggy': [], 'status': []}
+        
+        if self.enable_live_plot:
+            self._setup_live_plot()
 
     def evaluate(self, batch: list, candidate: dict[str, str], capture_traces: bool = False) -> EvaluationBatch:
         """
@@ -248,6 +266,13 @@ REMEMBER: You MUST create submission.csv in EVERY iteration. Without it, your sc
                     is_buggy = node.is_buggy if hasattr(node, 'is_buggy') else "Unknown"
                     print(f"  Node {i}: score={node_score}, status={node_status}, buggy={is_buggy}")
                 
+                # Update live plot with all nodes (in case we missed any)
+                if self.enable_live_plot:
+                    self._update_live_plot(agent.journal)
+                
+                # Save journal data to files
+                self._save_journal_data(agent.journal, episode_idx)
+                
                 # Retrieve the best score recorded in the agent's journal
                 best_node = agent.journal.get_best_node(only_good=False)  # Get best even if buggy
                 if best_node:
@@ -388,3 +413,147 @@ REMEMBER: You MUST create submission.csv in EVERY iteration. Without it, your sc
         
         print(f"[Adapter] No CV score pattern matched in stdout")
         return 0.0
+    
+    def _setup_live_plot(self):
+        """Initialize the live plotting window with dark theme and pink/green styling."""
+        plt.ion()  # Enable interactive mode
+        plt.style.use('dark_background')
+        
+        self.fig, self.ax = plt.subplots(figsize=(12, 6))
+        self.fig.canvas.manager.set_window_title('Journal Node Scores - Live')
+        
+        self.ax.set_xlabel('Node ID', fontsize=12, fontweight='bold')
+        self.ax.set_ylabel('Score', fontsize=12, fontweight='bold')
+        self.ax.set_title('Journal Node Scores (Live)', fontsize=14, fontweight='bold', pad=20)
+        self.ax.grid(True, alpha=0.3, linestyle='--')
+        
+        plt.tight_layout()
+        plt.show(block=False)
+        plt.pause(0.1)
+    
+    def _update_live_plot(self, journal):
+        """Update the live plot with current journal data."""
+        if not self.enable_live_plot or self.ax is None:
+            return
+        
+        # Clear the axis
+        self.ax.clear()
+        
+        # Extract all node data
+        node_ids = []
+        scores = []
+        buggy_flags = []
+        
+        for i, node in enumerate(journal.nodes):
+            node_score = float(node.metric.value) if (hasattr(node, 'metric') and node.metric) else 0.0
+            is_buggy = bool(node.is_buggy) if hasattr(node, 'is_buggy') else True
+            
+            node_ids.append(i)
+            scores.append(node_score)
+            buggy_flags.append(is_buggy)
+        
+        if not node_ids:
+            return
+        
+        # Plot with pink (buggy) and green (successful) dots
+        buggy_nodes = [(nid, score) for nid, score, buggy in zip(node_ids, scores, buggy_flags) if buggy]
+        good_nodes = [(nid, score) for nid, score, buggy in zip(node_ids, scores, buggy_flags) if not buggy]
+        
+        if buggy_nodes:
+            buggy_ids, buggy_scores = zip(*buggy_nodes)
+            self.ax.scatter(buggy_ids, buggy_scores, 
+                          c='#FF69B4', s=100, alpha=0.7, label='Buggy/Failed',
+                          edgecolors='white', linewidth=0.5)
+        
+        if good_nodes:
+            good_ids, good_scores = zip(*good_nodes)
+            self.ax.scatter(good_ids, good_scores, 
+                          c='#00FF7F', s=100, alpha=0.7, label='Successful',
+                          edgecolors='white', linewidth=0.5)
+        
+        # Restore styling
+        self.ax.set_xlabel('Node ID', fontsize=12, fontweight='bold')
+        self.ax.set_ylabel('Score', fontsize=12, fontweight='bold')
+        self.ax.set_title(f'Journal Node Scores (Live) - {len(node_ids)} nodes', 
+                         fontsize=14, fontweight='bold', pad=20)
+        self.ax.legend(loc='best', framealpha=0.9)
+        self.ax.grid(True, alpha=0.3, linestyle='--')
+        
+        # Refresh the plot
+        self.fig.canvas.draw()
+        self.fig.canvas.flush_events()
+        plt.pause(0.01)
+    
+    def _save_journal_data(self, journal, episode_idx: int):
+        """
+        Save journal node data to JSON and CSV files for later analysis and plotting.
+        
+        Args:
+            journal: The agent's journal object containing node history
+            episode_idx: Current episode index for file naming
+        """
+        # Create logs directory if it doesn't exist
+        logs_dir = Path(self.output_dir) / "journal_logs"
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Generate timestamp for unique file naming
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        
+        # Prepare data structures
+        json_data = {
+            "competition": self.competition_name,
+            "episode": episode_idx,
+            "timestamp": timestamp,
+            "nodes": []
+        }
+        
+        csv_rows = []
+        
+        for i, node in enumerate(journal.nodes):
+            # Extract node information
+            node_score = float(node.metric.value) if (hasattr(node, 'metric') and node.metric) else 0.0
+            node_status = str(node.status) if hasattr(node, 'status') else "UNKNOWN"
+            is_buggy = bool(node.is_buggy) if hasattr(node, 'is_buggy') else False
+            
+            # JSON format (detailed)
+            node_data = {
+                "node_id": i,
+                "score": node_score,
+                "status": node_status,
+                "buggy": is_buggy,
+                "episode": episode_idx
+            }
+            json_data["nodes"].append(node_data)
+            
+            # CSV format (flat, easy for plotting)
+            csv_rows.append({
+                "episode": episode_idx,
+                "node_id": i,
+                "score": node_score,
+                "status": node_status,
+                "buggy": is_buggy,
+                "timestamp": timestamp
+            })
+        
+        # Save JSON file
+        json_file = logs_dir / f"journal_episode_{episode_idx}_{timestamp}.json"
+        with open(json_file, 'w') as f:
+            json.dump(json_data, f, indent=2)
+        print(f"[Adapter] Saved journal to {json_file}")
+        
+        # Save/append to CSV file (append mode for continuous logging)
+        csv_file = logs_dir / f"journal_history.csv"
+        file_exists = csv_file.exists()
+        
+        with open(csv_file, 'a', newline='') as f:
+            if csv_rows:
+                fieldnames = ['episode', 'node_id', 'score', 'status', 'buggy', 'timestamp']
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
+                
+                # Write header only if file is new
+                if not file_exists:
+                    writer.writeheader()
+                
+                writer.writerows(csv_rows)
+        
+        print(f"[Adapter] Appended {len(csv_rows)} rows to {csv_file}")
