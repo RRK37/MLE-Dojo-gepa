@@ -12,6 +12,7 @@ import re
 import tiktoken
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from dataclasses import dataclass
+from pathlib import Path
 from openai import OpenAI
 import random
 
@@ -324,13 +325,45 @@ class MLEStarAgent:
         model_desc = model.get("model_name", "")
         example_code = model.get("example_code", "")
         
+        # Debug: Check data directory and files
+        logger.info("=" * 80)
+        logger.info("🔍 DATA DIRECTORY DEBUG (prompt_2_initial_solution):")
+        logger.info("=" * 80)
+        logger.info(f"  self.data_dir (absolute): {self.data_dir}")
+        logger.info(f"  Data dir exists: {os.path.exists(self.data_dir)}")
+        if os.path.exists(self.data_dir):
+            try:
+                import glob
+                all_files = os.listdir(self.data_dir)
+                csv_files = glob.glob(os.path.join(self.data_dir, "*.csv"))
+                parquet_files = glob.glob(os.path.join(self.data_dir, "*.parquet"))
+                logger.info(f"  Total files in data_dir: {len(all_files)}")
+                logger.info(f"  CSV files: {len(csv_files)}")
+                for f in csv_files[:5]:
+                    logger.info(f"    - {os.path.basename(f)}")
+                logger.info(f"  Parquet files: {len(parquet_files)}")
+                for f in parquet_files[:5]:
+                    logger.info(f"    - {os.path.basename(f)}")
+                # Show first few files
+                logger.info(f"  First 10 files/dirs:")
+                for f in sorted(all_files)[:10]:
+                    logger.info(f"    - {f}")
+            except Exception as e:
+                logger.warning(f"  Could not list files: {e}")
+        else:
+            logger.error(f"  ⚠️ DATA DIRECTORY DOES NOT EXIST: {self.data_dir}")
+        logger.info(f"  Code will run from: /tmp/ (temporary directory)")
+        logger.info(f"  Prompt will instruct: Use absolute path '{self.data_dir}' or find data files")
+        logger.info("=" * 80)
+        
         available_packages = self._get_available_packages()
         prompt = prompts.prompt_2_initial_solution(
             self.task_desc,
             model_desc,
             example_code,
             self.data_dir,
-            available_packages
+            available_packages,
+            self.data_preview or ""
         )
         
         response = self._safe_query_llm(prompt)
@@ -676,6 +709,29 @@ class MLEStarAgent:
             bug_history=relevant_bug_history
         )
         
+        # Debug: Check data directory before debugging
+        logger.info("🔍 DATA DIRECTORY DEBUG (in _debug_code):")
+        logger.info(f"  self.data_dir (absolute): {self.data_dir}")
+        logger.info(f"  Data dir exists: {os.path.exists(self.data_dir)}")
+        if os.path.exists(self.data_dir):
+            try:
+                import glob
+                csv_files = glob.glob(os.path.join(self.data_dir, "*.csv"))
+                parquet_files = glob.glob(os.path.join(self.data_dir, "*.parquet"))
+                logger.info(f"  CSV files found: {len(csv_files)}")
+                for f in csv_files[:5]:
+                    logger.info(f"    - {os.path.basename(f)}")
+                logger.info(f"  Parquet files found: {len(parquet_files)}")
+                for f in parquet_files[:5]:
+                    logger.info(f"    - {os.path.basename(f)}")
+            except Exception as e:
+                logger.warning(f"  Could not search for data files: {e}")
+        else:
+            logger.error(f"  ⚠️ DATA DIRECTORY DOES NOT EXIST: {self.data_dir}")
+        logger.info(f"  Code runs from: /tmp/ (temporary directory)")
+        logger.info(f"  Prompt will instruct: Use absolute path '{self.data_dir}'")
+        logger.info("-" * 80)
+        
         # Log what we're asking the LLM to do
         logger.info("📝 PROMPT CONTEXT PASSED TO LLM:")
         logger.info(f"  - Task description: {'Yes' if self.task_desc else 'No'} ({len(self.task_desc) if self.task_desc else 0} chars)")
@@ -683,6 +739,7 @@ class MLEStarAgent:
         logger.info(f"  - Full execution feedback: {'Yes' if full_feedback else 'No'} ({len(full_feedback)} chars)")
         logger.info(f"  - Bug history: {len(relevant_bug_history)} entries")
         logger.info(f"  - Available packages: Included")
+        logger.info(f"  - Data directory path: {self.data_dir}")
         logger.info("-" * 80)
         
         # Query LLM
@@ -770,6 +827,7 @@ class MLEStarAgent:
     def _get_available_packages(self) -> str:
         """Get list of available packages from requirements.txt (like AIDE)."""
         packages = []
+        req_file_used = None
         try:
             # Try to read from requirements.txt in workspace or current dir
             req_paths = [
@@ -780,6 +838,8 @@ class MLEStarAgent:
             
             for req_path in req_paths:
                 if req_path.exists():
+                    req_file_used = str(req_path)
+                    logger.debug(f"Reading packages from: {req_path}")
                     with open(req_path, 'r') as f:
                         for line in f:
                             line = line.strip()
@@ -792,10 +852,11 @@ class MLEStarAgent:
                                     packages.append(pkg)
                     break
         except Exception as e:
-            logger.debug(f"Could not read requirements.txt: {e}")
+            logger.warning(f"Could not read requirements.txt: {e}")
         
         # If no packages found, use fallback list (like AIDE)
         if not packages:
+            logger.warning("No packages found in requirements.txt, using fallback list")
             packages = [
                 "numpy", "pandas", "scikit-learn", "statsmodels",
                 "xgboost", "lightgbm", "torch", "torchvision",
@@ -804,9 +865,13 @@ class MLEStarAgent:
                 "seaborn", "plotly", "opencv-python", "nltk", "spacy"
             ]
         
+        # Log packages info
+        logger.debug(f"Packages loaded from: {req_file_used or 'fallback list'}")
+        logger.debug(f"Total packages available: {len(packages)}")
+        
         # Shuffle and limit to reasonable number (like AIDE does)
         random.shuffle(packages)
-        pkg_str = ", ".join([f"`{p}`" for p in packages[:25]])  # Show top 25
+        pkg_str = ", ".join([f"`{p}`" for p in packages[:30]])  # Show top 30 (increased from 25)
         
         return f"Your solution can use any relevant machine learning packages such as: {pkg_str}. Feel free to use any other packages too (all packages are already installed!). For neural networks, use PyTorch rather than TensorFlow. You have access to a GPU and can use CUDA for faster computations if needed."
     
