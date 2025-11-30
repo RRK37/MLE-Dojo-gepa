@@ -181,9 +181,14 @@ def main():
     print(result.best_candidate['system_prompt'])
     print("-" * 20)
     
-    # Optional: Save the best prompt to a file
+    # Save the best prompt to a file
     with open("best_prompt.txt", "w") as f:
         f.write(result.best_candidate['system_prompt'])
+    
+    # Close adapter and save final plot
+    adapter.close()
+    print("\nPress Enter to close the plot window...")
+    input()
 
 if __name__ == "__main__":
     main()

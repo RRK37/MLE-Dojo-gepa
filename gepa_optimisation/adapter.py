@@ -6,6 +6,9 @@ from mledojo.competitions import get_metric
 import csv
 import os
 from datetime import datetime
+import matplotlib.pyplot as plt
+from matplotlib.animation import FuncAnimation
+import threading
 
 class MLEDojoGEPAAdapter(GEPAAdapter):
     def __init__(self, 
@@ -43,6 +46,78 @@ class MLEDojoGEPAAdapter(GEPAAdapter):
         # Track GEPA and agent iterations
         self.gepa_iteration = 0
         self.total_evaluations = 0
+        
+        # Real-time plotting data
+        self.plot_data = {
+            'gepa_iterations': [],
+            'agent_steps': [],
+            'cv_scores': [],
+            'colors': []  # Different color per GEPA iteration
+        }
+        self.plot_lock = threading.Lock()
+        
+        # Initialize plot
+        self._init_plot()
+    
+    def _init_plot(self):
+        """Initialize the real-time plotting."""
+        plt.ion()  # Turn on interactive mode
+        self.fig, self.ax = plt.subplots(figsize=(12, 6))
+        self.scatter = None
+    def _log_cv_score(self, gepa_iter, episode_idx, agent_step, cv_score, exec_status, has_submission, final_reward, prompt_preview):
+        """Log a CV score to the CSV file and update plot."""
+        # Write to CSV
+        with open(self.cv_log_file, 'a', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                gepa_iter,
+                episode_idx,
+                agent_step,
+                cv_score,
+                exec_status,
+                has_submission,
+                final_reward,
+                prompt_preview
+            ])
+        
+        # Update plot data
+        with self.plot_lock:
+            self.plot_data['gepa_iterations'].append(gepa_iter)
+            self.plot_data['agent_steps'].append(agent_step)
+            self.plot_data['cv_scores'].append(cv_score)
+        
+        # Update plot
+        self._update_plot()e_plot(self):
+        """Update the real-time plot with new data."""
+        with self.plot_lock:
+            if not self.plot_data['cv_scores']:
+                return
+            
+            self.ax.clear()
+            
+            # Create scatter plot with different colors per GEPA iteration
+            unique_iters = sorted(set(self.plot_data['gepa_iterations']))
+            colors = plt.cm.tab10(range(len(unique_iters)))
+            
+            for i, gepa_iter in enumerate(unique_iters):
+                mask = [g == gepa_iter for g in self.plot_data['gepa_iterations']]
+                steps = [s for s, m in zip(self.plot_data['agent_steps'], mask) if m]
+                scores = [sc for sc, m in zip(self.plot_data['cv_scores'], mask) if m]
+                
+                self.ax.scatter(steps, scores, c=[colors[i]], label=f'GEPA Iter {gepa_iter}', 
+                               s=100, alpha=0.6, edgecolors='black', linewidth=1)
+            
+            self.ax.set_xlabel('Agent Step (within episode)', fontsize=12)
+            self.ax.set_ylabel('CV Score', fontsize=12)
+            self.ax.set_title(f'Real-time CV Scores - {self.competition_name}', fontsize=14, fontweight='bold')
+            self.ax.grid(True, alpha=0.3)
+            self.ax.set_ylim(0, 1)
+            self.ax.legend(loc='upper left', fontsize=10)
+            
+            plt.tight_layout()
+            plt.draw()
+            plt.pause(0.01)
     
     def _init_cv_log(self):
         """Initialize the CSV file for logging CV scores."""
@@ -222,18 +297,31 @@ REMEMBER: You MUST create submission.csv in EVERY iteration. Without it, your sc
                 has_submission = reward > 0.0
                 if cv_score > 0 and reward == 0.0:
                     reward = cv_score
-                    print(f"[Adapter] ✓ Using CV score from iteration output as reward: {reward:.4f}")
-                
-                # Log CV score if extracted
-                if cv_score > 0:
-                    self._log_cv_score(
-                        gepa_iter=self.gepa_iteration,
-                        episode_idx=episode_idx,
-                        agent_step=steps,
-                        cv_score=cv_score,
-                        exec_status=execution_status,
-                        has_submission=has_submission,
-                        final_reward=reward,
+        print(f"[Adapter] Returning {len(rollout_outputs)} outputs with scores: {scores}")
+        print(f"[Adapter] CV scores logged to: {self.cv_log_file}")
+        
+        # Increment GEPA iteration counter for next evaluation
+        self.gepa_iteration += 1
+        self.total_evaluations += len(rollout_outputs)
+        
+        # Final plot update for this evaluation
+        self._update_plot()
+        
+        return EvaluationBatch(
+            outputs=rollout_outputs,
+            scores=scores,
+            trajectories=trajectories
+        )
+    
+    def close(self):
+        """Close the plot window and save final figure."""
+        try:
+            final_plot_path = os.path.join(self.log_dir, f"cv_scores_{self.competition_name}_final.png")
+            self.fig.savefig(final_plot_path, dpi=300, bbox_inches='tight')
+            print(f"[Adapter] Final plot saved to: {final_plot_path}")
+            plt.close(self.fig)
+        except Exception as e:
+            print(f"[Adapter] Error saving final plot: {e}")               final_reward=reward,
                         prompt_preview=base_system_prompt[:100]
                     )
                 
