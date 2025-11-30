@@ -7,7 +7,7 @@ gepa:
   
   # LLM for reflection and prompt improvement
   # Using a stable model ID. 
-  reflection_lm: "openai/gpt-4o"
+  reflection_lm: "anthropic/claude-3-5-sonnet"
   
   # LLM used by AIDE agent (being optimized)
   task_lm: null
