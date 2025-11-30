@@ -1,0 +1,538 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GEPA for MLE-Dojo - Genetic Pareto Optimization</title>
+    <style>
+        :root {
+            --primary: #2563eb;
+            --secondary: #3b82f6;
+            --dark: #1e293b;
+            --light: #f8fafc;
+            --accent: #10b981;
+            --text: #334155;
+        }
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            line-height: 1.6;
+            color: var(--text);
+            background: var(--light);
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 2rem;
+        }
+        
+        header {
+            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+            color: white;
+            padding: 4rem 0 3rem;
+            text-align: center;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        
+        header h1 {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+            font-weight: 700;
+        }
+        
+        header p {
+            font-size: 1.3rem;
+            opacity: 0.95;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        
+        .badges {
+            margin-top: 1.5rem;
+            display: flex;
+            gap: 1rem;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        
+        .badge {
+            background: rgba(255,255,255,0.2);
+            padding: 0.5rem 1rem;
+            border-radius: 20px;
+            font-size: 0.9rem;
+            backdrop-filter: blur(10px);
+        }
+        
+        .badge a {
+            color: white;
+            text-decoration: none;
+            font-weight: 500;
+        }
+        
+        section {
+            padding: 4rem 0;
+        }
+        
+        section h2 {
+            font-size: 2.2rem;
+            margin-bottom: 2rem;
+            color: var(--dark);
+            border-bottom: 3px solid var(--primary);
+            padding-bottom: 0.5rem;
+            display: inline-block;
+        }
+        
+        section h3 {
+            font-size: 1.5rem;
+            margin: 2rem 0 1rem;
+            color: var(--primary);
+        }
+        
+        .grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 2rem;
+            margin-top: 2rem;
+        }
+        
+        .card {
+            background: white;
+            padding: 2rem;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            transition: transform 0.3s, box-shadow 0.3s;
+        }
+        
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 16px rgba(0,0,0,0.15);
+        }
+        
+        .card h3 {
+            margin-top: 0;
+            color: var(--primary);
+        }
+        
+        .card p {
+            color: var(--text);
+            margin-bottom: 1rem;
+        }
+        
+        .feature-icon {
+            font-size: 2.5rem;
+            margin-bottom: 1rem;
+        }
+        
+        code {
+            background: #f1f5f9;
+            padding: 0.2rem 0.4rem;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            color: #e11d48;
+        }
+        
+        pre {
+            background: var(--dark);
+            color: #e2e8f0;
+            padding: 1.5rem;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 1rem 0;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        
+        pre code {
+            background: none;
+            color: inherit;
+            padding: 0;
+        }
+        
+        .highlight {
+            background: linear-gradient(135deg, var(--accent) 0%, #059669 100%);
+            color: white;
+            padding: 2rem;
+            border-radius: 12px;
+            margin: 2rem 0;
+        }
+        
+        .highlight h3 {
+            color: white;
+            margin-top: 0;
+        }
+        
+        .btn {
+            display: inline-block;
+            background: var(--primary);
+            color: white;
+            padding: 0.8rem 2rem;
+            border-radius: 6px;
+            text-decoration: none;
+            font-weight: 600;
+            transition: background 0.3s;
+            margin: 0.5rem;
+        }
+        
+        .btn:hover {
+            background: var(--secondary);
+        }
+        
+        .btn-outline {
+            background: transparent;
+            border: 2px solid var(--primary);
+            color: var(--primary);
+        }
+        
+        .btn-outline:hover {
+            background: var(--primary);
+            color: white;
+        }
+        
+        ul {
+            list-style-position: inside;
+            margin: 1rem 0;
+        }
+        
+        li {
+            margin: 0.5rem 0;
+        }
+        
+        footer {
+            background: var(--dark);
+            color: white;
+            text-align: center;
+            padding: 2rem 0;
+            margin-top: 4rem;
+        }
+        
+        footer a {
+            color: var(--accent);
+            text-decoration: none;
+        }
+        
+        .architecture-diagram {
+            background: white;
+            padding: 2rem;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            margin: 2rem 0;
+        }
+        
+        @media (max-width: 768px) {
+            header h1 {
+                font-size: 2rem;
+            }
+            
+            header p {
+                font-size: 1.1rem;
+            }
+            
+            section h2 {
+                font-size: 1.8rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="container">
+            <h1>🧬 GEPA for MLE-Dojo</h1>
+            <p>Genetic Pareto Optimization through Reflective Text Evolution for Machine Learning Engineering</p>
+            <div class="badges">
+                <span class="badge"><a href="https://github.com/gepa-ai/gepa" target="_blank">🔗 Original GEPA</a></span>
+                <span class="badge"><a href="https://github.com/RRK37/MLE-Dojo-gepa" target="_blank">📦 MLE-Dojo Wrapper</a></span>
+                <span class="badge"><a href="https://arxiv.org/abs/2505.07782" target="_blank">📄 MLE-Dojo Paper</a></span>
+            </div>
+        </div>
+    </header>
+
+    <section id="overview">
+        <div class="container">
+            <h2>What is GEPA?</h2>
+            <p style="font-size: 1.1rem; margin-bottom: 2rem;">
+                <strong>GEPA (Genetic Pareto)</strong> is a cutting-edge system optimization framework that uses <em>reflective text evolution</em> 
+                to automatically improve LLM agent performance through multi-objective optimization. Think of it as evolution for AI systems – 
+                GEPA maintains a population of solutions, evaluates them across multiple objectives, and evolves better strategies over time.
+            </p>
+            
+            <div class="grid">
+                <div class="card">
+                    <div class="feature-icon">🧬</div>
+                    <h3>Genetic Evolution</h3>
+                    <p>Maintains populations of solutions, applies crossover and mutation to generate improved variants.</p>
+                </div>
+                <div class="card">
+                    <div class="feature-icon">📊</div>
+                    <h3>Pareto Optimization</h3>
+                    <p>Optimizes multiple objectives simultaneously (e.g., score vs. execution time, accuracy vs. complexity).</p>
+                </div>
+                <div class="card">
+                    <div class="feature-icon">🔄</div>
+                    <h3>Reflective Learning</h3>
+                    <p>Agents learn from past executions, extracting patterns that correlate with success or failure.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section id="integration" style="background: white;">
+        <div class="container">
+            <h2>GEPA × MLE-Dojo Integration</h2>
+            <p style="font-size: 1.1rem; margin-bottom: 2rem;">
+                We've integrated GEPA's powerful optimization framework with <strong>MLE-Dojo</strong>, a Gym-style environment for 
+                training and evaluating ML agents on 200+ real-world Kaggle competitions.
+            </p>
+            
+            <div class="highlight">
+                <h3>🎯 Key Integration Features</h3>
+                <ul>
+                    <li><strong>Multi-Objective Optimization:</strong> Balance leaderboard score, execution time, code complexity, and model robustness</li>
+                    <li><strong>Pattern Analysis:</strong> Automatically learn what works (XGBoost + CV) and what doesn't (RF without validation)</li>
+                    <li><strong>Population Management:</strong> Maintain diverse solution strategies to avoid local optima</li>
+                    <li><strong>Reflective Evolution:</strong> Inject learned insights into future generations of solutions</li>
+                </ul>
+            </div>
+            
+            <h3>How It Works</h3>
+            <div class="architecture-diagram">
+                <pre><code>┌─────────────────────────────────────────────────────────────┐
+│                      GEPA Optimization Loop                 │
+├─────────────────────────────────────────────────────────────┤
+│                                                             │
+│  1. Initialize Population                                   │
+│     └─ Generate diverse ML solutions                        │
+│                                                             │
+│  2. Execute & Evaluate (MLE-Dojo)                          │
+│     ├─ Run solutions in isolated sandboxes                 │
+│     ├─ Measure: score, time, complexity                    │
+│     └─ Compute Pareto frontier                             │
+│                                                             │
+│  3. Pattern Analysis                                        │
+│     ├─ Extract code features                               │
+│     ├─ Cluster similar solutions                           │
+│     └─ Identify success patterns                           │
+│                                                             │
+│  4. Genetic Operators                                       │
+│     ├─ Selection: Pick from Pareto front                   │
+│     ├─ Crossover: Combine best strategies                  │
+│     └─ Mutation: Introduce variations                      │
+│                                                             │
+│  5. Reflective Injection                                    │
+│     └─ Feed learned patterns → next generation             │
+│                                                             │
+│  Repeat until convergence or budget exhausted              │
+└─────────────────────────────────────────────────────────────┘</code></pre>
+            </div>
+        </div>
+    </section>
+
+    <section id="usage">
+        <div class="container">
+            <h2>Quick Start</h2>
+            
+            <h3>Installation</h3>
+            <pre><code># Clone the repository
+git clone https://github.com/RRK37/MLE-Dojo-gepa.git
+cd MLE-Dojo-gepa
+
+# Set up environment
+conda create -n mle-dojo-gepa python=3.11
+conda activate mle-dojo-gepa
+pip install uv
+uv pip install -e .
+
+# Install GEPA
+pip install gepa</code></pre>
+            
+            <h3>Basic Usage</h3>
+            <pre><code># Run with GEPA optimization
+python main.py \
+    --competition-name titanic \
+    --agent-type aide \
+    --optimization gepa \
+    --population-size 5 \
+    --generations 10 \
+    --objectives score,time,complexity</code></pre>
+            
+            <h3>Configuration</h3>
+            <pre><code># config.yaml
+gepa:
+  population_size: 5
+  generations: 10
+  mutation_rate: 0.15
+  crossover_rate: 0.8
+  objectives:
+    - name: leaderboard_score
+      weight: 0.6
+      maximize: true
+    - name: execution_time
+      weight: 0.2
+      maximize: false
+    - name: code_complexity
+      weight: 0.2
+      maximize: false
+  
+pattern_analysis:
+  enabled: true
+  analysis_frequency: 3  # Analyze every 3 steps
+  min_solutions: 3       # Minimum solutions to analyze</code></pre>
+        </div>
+    </section>
+
+    <section id="features" style="background: white;">
+        <div class="container">
+            <h2>Advanced Features</h2>
+            
+            <div class="grid">
+                <div class="card">
+                    <h3>🎨 Pattern Discovery</h3>
+                    <p>Automatically clusters solutions by similarity and identifies:</p>
+                    <ul style="list-style-position: outside; margin-left: 1.5rem;">
+                        <li>High-performing patterns</li>
+                        <li>Risky but high-reward approaches</li>
+                        <li>Consistently failing strategies</li>
+                    </ul>
+                </div>
+                
+                <div class="card">
+                    <h3>⏱️ Temporal Analysis</h3>
+                    <p>Detects stagnation and diversity loss:</p>
+                    <ul style="list-style-position: outside; margin-left: 1.5rem;">
+                        <li>Score plateau detection</li>
+                        <li>Solution diversity metrics</li>
+                        <li>Automatic exploration triggers</li>
+                    </ul>
+                </div>
+                
+                <div class="card">
+                    <h3>🧩 Multi-Objective Trade-offs</h3>
+                    <p>Balance competing objectives:</p>
+                    <ul style="list-style-position: outside; margin-left: 1.5rem;">
+                        <li>Pareto frontier visualization</li>
+                        <li>Configurable objective weights</li>
+                        <li>Trade-off analysis reports</li>
+                    </ul>
+                </div>
+                
+                <div class="card">
+                    <h3>📈 Progress Tracking</h3>
+                    <p>Comprehensive experiment logging:</p>
+                    <ul style="list-style-position: outside; margin-left: 1.5rem;">
+                        <li>Population evolution history</li>
+                        <li>Pattern analysis insights</li>
+                        <li>Performance trajectories</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section id="results">
+        <div class="container">
+            <h2>Why GEPA for ML Engineering?</h2>
+            
+            <div class="highlight">
+                <h3>🚀 Advantages Over Traditional Approaches</h3>
+                <ul>
+                    <li><strong>Automatic Exploration:</strong> No manual prompt engineering – GEPA discovers what works</li>
+                    <li><strong>Escape Local Optima:</strong> Population diversity prevents getting stuck on suboptimal solutions</li>
+                    <li><strong>Multi-Objective Awareness:</strong> Real competitions require balancing multiple constraints</li>
+                    <li><strong>Knowledge Transfer:</strong> Learned patterns can inform future competitions</li>
+                    <li><strong>Scalable:</strong> Works with any LLM backend (GPT-4, Claude, DeepSeek, local models)</li>
+                </ul>
+            </div>
+            
+            <h3>Example Insights Generated</h3>
+            <pre><code>═══════════════════════════════════════════════════════════
+Pattern Analysis: Iteration 6 (Titanic Competition)
+═══════════════════════════════════════════════════════════
+
+✅ HIGH-PERFORMING PATTERN (Cluster 1, 3 solutions, avg score: 0.78)
+   Common Features:
+   - Model: XGBoost, Random Forest ensemble
+   - Validation: 5-fold cross-validation
+   - Feature Engineering: Family size, Title extraction
+   - Preprocessing: MinMaxScaler, target encoding
+   
+   💡 Guidance: Continue using ensemble methods with robust CV
+
+⚠️  RISKY PATTERN (Cluster 2, 2 solutions, avg: 0.71, std: 0.15)
+   Common Features:
+   - Model: Neural network (MLP)
+   - Validation: Simple train-test split
+   - Preprocessing: StandardScaler only
+   
+   💡 Guidance: High variance - add regularization or more data
+
+❌ LOW-PERFORMING PATTERN (Cluster 3, 2 solutions, avg: 0.58)
+   Common Features:
+   - Model: Logistic regression
+   - No feature engineering
+   - Missing value imputation with mean only
+   
+   💡 Guidance: Avoid simplistic approaches without feature work
+
+🔄 TEMPORAL ALERT: Diversity decreasing, consider new approach
+═══════════════════════════════════════════════════════════</code></pre>
+        </div>
+    </section>
+
+    <section id="resources" style="background: white;">
+        <div class="container">
+            <h2>Resources & Links</h2>
+            
+            <div class="grid">
+                <div class="card">
+                    <h3>📚 Documentation</h3>
+                    <p><a href="https://github.com/gepa-ai/gepa" target="_blank">GEPA Original Repository</a></p>
+                    <p><a href="https://mle-dojo.github.io/MLE-Dojo-page/" target="_blank">MLE-Dojo Documentation</a></p>
+                    <p><a href="../PATTERN_ANALYSIS.md">Pattern Analysis System</a></p>
+                </div>
+                
+                <div class="card">
+                    <h3>📄 Papers</h3>
+                    <p><a href="https://arxiv.org/abs/2505.07782" target="_blank">MLE-Dojo: Interactive Environments for LLM Agents</a></p>
+                    <p><em>GEPA paper coming soon</em></p>
+                </div>
+                
+                <div class="card">
+                    <h3>💻 Code</h3>
+                    <p><a href="https://github.com/RRK37/MLE-Dojo-gepa" target="_blank">GitHub Repository</a></p>
+                    <p><a href="https://github.com/RRK37/MLE-Dojo-gepa/tree/main/example" target="_blank">Examples</a></p>
+                </div>
+                
+                <div class="card">
+                    <h3>🤝 Community</h3>
+                    <p><a href="https://github.com/RRK37/MLE-Dojo-gepa/issues" target="_blank">Report Issues</a></p>
+                    <p><a href="https://github.com/RRK37/MLE-Dojo-gepa/discussions" target="_blank">Discussions</a></p>
+                </div>
+            </div>
+            
+            <div style="text-align: center; margin-top: 3rem;">
+                <a href="https://github.com/RRK37/MLE-Dojo-gepa" class="btn">View on GitHub</a>
+                <a href="https://github.com/gepa-ai/gepa" class="btn btn-outline">Original GEPA Repo</a>
+            </div>
+        </div>
+    </section>
+
+    <footer>
+        <div class="container">
+            <p>GEPA Integration for MLE-Dojo | Built with ❤️ for ML research</p>
+            <p>
+                <a href="https://github.com/gepa-ai/gepa">GEPA</a> × 
+                <a href="https://github.com/MLE-Dojo/MLE-Dojo">MLE-Dojo</a>
+            </p>
+            <p style="margin-top: 1rem; font-size: 0.9rem; opacity: 0.8;">
+                © 2025 | MIT License
+            </p>
+        </div>
+    </footer>
+</body>
+</html>
