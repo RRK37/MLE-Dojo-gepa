@@ -233,7 +233,7 @@ class MLEStarAgent:
                     self.best_solution = s_0
                     self.best_score = h_best
                     logger.info(f"Merged solution {i+1}, new score: {h_best}")
-                else:
+            else:
                     logger.info(f"Merged solution {i+1} did not improve, stopping merge")
                     break
         

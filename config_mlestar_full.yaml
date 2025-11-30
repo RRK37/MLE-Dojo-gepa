@@ -1,6 +1,6 @@
-# MLE-STAR Full Configuration (Default)
-# This is the full configuration. For MVP, use config_mlestar_mvp.yaml
+# MLE-STAR Full Configuration
 # Complete workflow with all features: Search → Foundation → Full Refinement → Iterative Ensemble → Comprehensive Validation
+# Based on PaperMethod.md full specification
 
 # Output directory for agent results and logs
 output_dir: "output/"
@@ -65,3 +65,4 @@ mlestar:
 # API Keys (should be set as environment variables)
 # - PERPLEXITY_API_KEY (for web search)
 # - ANTHROPIC_API_KEY (for Claude LLM - REQUIRED)
+

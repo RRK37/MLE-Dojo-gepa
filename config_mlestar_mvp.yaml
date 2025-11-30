@@ -1,0 +1,68 @@
+# MLE-STAR MVP Configuration
+# Minimal but complete workflow: Search → Foundation → Refinement → Ensemble → Validation
+# Based on PaperMethod.md MVP specification
+
+# Output directory for agent results and logs
+output_dir: "output/"
+
+# Competition settings
+competition:
+  name: "dog-breed-identification"
+  data_dir: "data/prepared"
+
+# Environment settings
+env:
+  render_mode: "human"
+  gpu_device: 0
+  gpu_memory_limit: 32
+  execution_timeout: 10000  # seconds
+  score_mode: "position"
+  max_steps: 15  # MVP: Fewer steps, focused workflow
+
+# Agent Type
+agent_type: "mlestar"
+
+# Agent configuration (AIDE-style for workspace management)
+agent:
+  # LLM Configuration
+  model_mode: "claude"  # Options: claude, openai, gemini
+  model_name: "claude-opus-4-5"  # Latest Claude Opus 4.5 (released Nov 24, 2025) - best for MLE-STAR
+  temperature: 0.7
+  top_p: 1.0
+  max_completion_tokens: 8192
+  max_prompt_tokens: 30000
+  api_idx: 0
+  api_key: ""  # Set via ANTHROPIC_API_KEY environment variable
+  
+  # AIDE-style config
+  steps: 15  # MVP: Reduced steps for faster completion
+  data_preview: true
+  expose_prediction: false
+  k_fold_validation: 1
+
+# MLE-STAR MVP Configuration
+# Following PaperMethod.md MVP specification:
+# 1. Web Search: 1-3 iterations (using 3)
+# 2. Merging: Sequential merge from Algorithm 1
+# 3. Refinement: 2 outer loops, skip inner loop (K=1)
+# 4. Ensemble: Simple ensemble (baseline + refined), not iterative
+# 5. Validation: Basic debugging + lightweight leakage/usage checks
+mlestar:
+  # Search Phase (MVP: 3 iterations as recommended)
+  search_iterations: 3
+  num_models_to_retrieve: 3
+  
+  # Refinement Phase (MVP: 2 outer loops, skip inner loop)
+  refinement_iterations: 2  # One or two outer loops (MVP recommendation)
+  inner_refinement_steps: 1  # MVP: Skip inner loop, just one refinement per outer loop
+  
+  # Ensemble Phase (MVP: Simple ensemble, not iterative)
+  ensemble_iterations: 1  # MVP: Simple ensemble, not iterative planning
+  
+  # Data handling
+  subsample_size: 30000
+
+# API Keys (should be set as environment variables)
+# - PERPLEXITY_API_KEY (for web search)
+# - ANTHROPIC_API_KEY (for Claude LLM - REQUIRED)
+
