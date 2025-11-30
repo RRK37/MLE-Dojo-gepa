@@ -197,6 +197,7 @@ class APIClient:
         print("MLE-Dojo API Client - Interactive Mode")
         print("=" * 80)
         print("\nAvailable commands:")
+        print("  <competition_name>          - Run prepare and main.py for a competition")
         print("  prepare <competition_name>  - Run prepare/mle.py for a competition")
         print("  run_main [config_path]      - Run main.py with config (default: config.yaml)")
         print("  read_files <output_dir>     - Read output files from directory")
@@ -248,8 +249,9 @@ class APIClient:
                             await self.stop_command(command_id)
                     
                     else:
-                        print(f"Unknown command: {cmd}")
-                        print("Type 'quit' to exit")
+                        # Treat as competition name - run prepare and main.py
+                        competition_name = user_input.strip()
+                        await self.run_competition(competition_name)
                 
                 except EOFError:
                     # Handle Ctrl+D
@@ -269,15 +271,21 @@ class APIClient:
                 pass
 
 
+    async def run_competition(self, competition_name: str):
+        """Run prepare and main.py for a competition."""
+        command = {
+            "command": "run_competition",
+            "competition_name": competition_name
+        }
+        return await self.send_command(command)
+
+
 async def main():
     """Main entry point."""
     parser = argparse.ArgumentParser(description="MLE-Dojo API Client")
+    parser.add_argument("competition_name", nargs="?", type=str, help="Competition name to run")
     parser.add_argument("--host", type=str, default="localhost", help="Server host")
     parser.add_argument("--port", type=int, default=8765, help="Server port")
-    parser.add_argument("--prepare", type=str, help="Competition name to prepare")
-    parser.add_argument("--run-main", type=str, nargs="?", const="config.yaml", help="Run main.py with config")
-    parser.add_argument("--read-files", type=str, help="Read files from output directory")
-    parser.add_argument("--interactive", action="store_true", help="Run in interactive mode")
     
     args = parser.parse_args()
     
@@ -287,31 +295,13 @@ async def main():
         sys.exit(1)
     
     try:
-        if args.prepare:
-            # Run prepare command
-            await client.prepare_competition(args.prepare)
+        if args.competition_name:
+            # Run prepare and main.py for the competition
+            await client.run_competition(args.competition_name)
             await client.listen()
-        
-        elif args.run_main is not None:
-            # Run main.py
-            config_path = args.run_main if args.run_main else "config.yaml"
-            await client.run_main(config_path)
-            await client.listen()
-        
-        elif args.read_files:
-            # Read files
-            await client.read_files(args.read_files)
-            await client.listen()
-        
-        elif args.interactive:
-            # Interactive mode
-            await client.interactive_mode()
-        
         else:
-            # Default: just listen
-            print("Connected. Listening for messages...")
-            print("(Use --interactive for interactive mode, or --help for options)")
-            await client.listen()
+            # Interactive mode if no competition name provided
+            await client.interactive_mode()
     
     except KeyboardInterrupt:
         print("\nInterrupted by user")

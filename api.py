@@ -12,6 +12,7 @@ import os
 import subprocess
 import sys
 import logging
+import tempfile
 from pathlib import Path
 from typing import Dict, Any, Optional
 import argparse
@@ -174,7 +175,7 @@ class DataStreamer:
         
         return await self.run_command(command, command_id, cwd=str(project_root))
     
-    async def run_main(self, config_path: str = "config.yaml"):
+    async def run_main(self, config_path: str = "config.yaml", competition_name: str = None):
         """Run main.py with a config file."""
         command_id = f"main_{Path(config_path).stem}"
         
@@ -192,6 +193,33 @@ class DataStreamer:
             })
             return -1
         
+        # Update config with competition name if provided
+        if competition_name:
+            try:
+                with open(config_file, 'r') as f:
+                    config = yaml.safe_load(f)
+                
+                if 'competition' not in config:
+                    config['competition'] = {}
+                config['competition']['name'] = competition_name
+                
+                # Write updated config to a temporary file
+                temp_config = tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False)
+                yaml.dump(config, temp_config)
+                temp_config_path = temp_config.name
+                temp_config.close()
+                
+                config_file = Path(temp_config_path)
+            except Exception as e:
+                logger.error(f"Error updating config: {e}")
+                await self.broadcast({
+                    "type": "command_error",
+                    "command_id": command_id,
+                    "error": f"Failed to update config: {e}",
+                    "timestamp": asyncio.get_event_loop().time()
+                })
+                return -1
+        
         command = [
             sys.executable,
             str(main_script),
@@ -199,7 +227,33 @@ class DataStreamer:
             str(config_file)
         ]
         
-        return await self.run_command(command, command_id, cwd=str(project_root))
+        return_code = await self.run_command(command, command_id, cwd=str(project_root))
+        
+        # Clean up temp config file if created
+        if competition_name and config_file != project_root / config_path:
+            try:
+                config_file.unlink()
+            except:
+                pass
+        
+        return return_code
+    
+    async def run_competition(self, competition_name: str, config_path: str = "config.yaml"):
+        """Run prepare and then main.py for a competition."""
+        # First, run prepare
+        prepare_code = await self.prepare_competition(competition_name)
+        
+        if prepare_code != 0:
+            await self.broadcast({
+                "type": "command_error",
+                "command_id": f"run_competition_{competition_name}",
+                "error": f"Prepare failed with code {prepare_code}",
+                "timestamp": asyncio.get_event_loop().time()
+            })
+            return prepare_code
+        
+        # Then run main.py with the competition name
+        return await self.run_main(config_path, competition_name)
     
     async def read_output_files(self, output_dir: str):
         """Read and send output files from the output directory."""
@@ -269,9 +323,36 @@ class DataStreamer:
                         else:
                             await self.prepare_competition(competition_name)
                     
+                    elif command == "run_competition":
+                        competition_name = data.get("competition_name")
+                        if not competition_name:
+                            await self.send_to_client(websocket, {
+                                "type": "error",
+                                "message": "competition_name is required for run_competition command"
+                            })
+                        else:
+                            config_path = data.get("config_path", "config.yaml")
+                            return_code = await self.run_competition(competition_name, config_path)
+                            
+                            # After main.py completes, read output files
+                            if return_code == 0:
+                                # Get output directory from config
+                                project_root = Path(__file__).parent.resolve()
+                                config_file = project_root / config_path
+                                
+                                if config_file.exists():
+                                    with open(config_file, 'r') as f:
+                                        config = yaml.safe_load(f)
+                                    
+                                    comp_name = config.get('competition', {}).get('name', competition_name)
+                                    output_dir = Path(config.get('output_dir', 'output')) / comp_name
+                                    
+                                    await self.read_output_files(str(output_dir))
+                    
                     elif command == "run_main":
                         config_path = data.get("config_path", "config.yaml")
-                        return_code = await self.run_main(config_path)
+                        competition_name = data.get("competition_name")
+                        return_code = await self.run_main(config_path, competition_name)
                         
                         # After main.py completes, read output files
                         if return_code == 0:
@@ -283,8 +364,8 @@ class DataStreamer:
                                 with open(config_file, 'r') as f:
                                     config = yaml.safe_load(f)
                                 
-                                competition_name = config.get('competition', {}).get('name', 'default')
-                                output_dir = Path(config.get('output_dir', 'output')) / competition_name
+                                comp_name = config.get('competition', {}).get('name', competition_name or 'default')
+                                output_dir = Path(config.get('output_dir', 'output')) / comp_name
                                 
                                 await self.read_output_files(str(output_dir))
                     
