@@ -1,4 +1,4 @@
-""
+"""
 Agent package for MLE-Dojo.
 
 This package contains all the available agents that can be used with the MLE-Dojo framework.
