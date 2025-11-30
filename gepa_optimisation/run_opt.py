@@ -45,13 +45,13 @@ def main():
             "expose_prediction": True,
             "data_preview": True,
             "code": {
-                "model_name": "claude-3-5-sonnet-20241022",
+                "model_name": "claude-3-5-sonnet",
                 "model_mode": "claude",
                 "port": 8314,
                 "max_completion_tokens": 8192,
                 "max_prompt_tokens": 30000,
                 "api_idx": 0,
-                "api_key": os.getenv("OPENAI_API_KEY"),
+                "api_key": os.getenv("ANTHROPIC_API_KEY"),
                 "temperature": 0.7,
                 "top_p": None
             },
@@ -164,7 +164,7 @@ def main():
         seed_candidate=seed_candidate,
         trainset=trainset,  # Provide dummy trainset items for GEPA's batch sampler
         adapter=adapter,
-        reflection_lm="claude-3-5-sonnet-20241022",  # The LLM analyzing the traces
+        reflection_lm="claude-3-5-sonnet",  # The LLM analyzing the traces
         candidate_selection_strategy="current_best",  # Select best performing candidate
         max_metric_calls=20,  # Limit total evaluations (5 generations * 4 candidates = 20)
         display_progress_bar=True
