@@ -8,7 +8,7 @@ from typing import Dict, Type, Any
 
 # Import all agents
 from mledojo.agent.mleagent.agent import KaggleAgent as MLEAgent
-from mledojo.agent.openaiagent.agent import OpenAIAgent
+from mledojo.agent.openaiagent.agent import OpenaiAgent
 from mledojo.agent.aide.agent import Agent as AIDAgent
 from mledojo.agent.dummy.agent import DummyAgent
 from mledojo.agent.mlestar.agent import MLEStarAgent
@@ -16,7 +16,7 @@ from mledojo.agent.mlestar.agent import MLEStarAgent
 # Agent registry
 AGENT_REGISTRY: Dict[str, Type[Any]] = {
     'mle': MLEAgent,
-    'openai': OpenAIAgent,
+    'openai': OpenaiAgent,
     'aide': AIDAgent,
     'dummy': DummyAgent,
     'mlestar': MLEStarAgent,  # Register MLE-STAR agent

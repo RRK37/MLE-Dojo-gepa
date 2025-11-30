@@ -364,7 +364,7 @@ Does above solution code uses all the information provided for training? Here is
 
 # Response format:
 Option 1: If the code did not use all the provided information, your response should be a single markdown code block (wrapped in ```) which is the improved code block. There should be no additional headings or text in your response  
-Option 2: If the code used all the provided information, simply state that "All the provided information is used.""""
+Option 2: If the code used all the provided information, simply state that 'All the provided information is used.'"""
 
 
 # Global instance
