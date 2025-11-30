@@ -73,14 +73,26 @@ def main():
     output_dir = "./output"
     task_desc = "Predict survival on the Titanic. Optimize for accuracy."
     
-    # Workaround: Titanic has gender_submission.csv but framework expects sample_submission.csv
+    # Workaround: Fix Titanic data structure to match framework expectations
     import shutil
+    import pandas as pd
     from pathlib import Path
+    
+    # 1. Create sample_submission.csv from gender_submission.csv
     sample_sub_path = Path(data_dir) / "public" / "sample_submission.csv"
     gender_sub_path = Path(data_dir) / "public" / "gender_submission.csv"
     if not sample_sub_path.exists() and gender_sub_path.exists():
         print(f"Creating sample_submission.csv from gender_submission.csv...")
         shutil.copy(gender_sub_path, sample_sub_path)
+    
+    # 2. Create test_answer.csv from private_leaderboard.csv
+    test_answer_path = Path(data_dir) / "private" / "test_answer.csv"
+    private_leaderboard_path = Path(data_dir) / "private" / "private_leaderboard.csv"
+    if not test_answer_path.exists() and private_leaderboard_path.exists():
+        print(f"Creating test_answer.csv from private_leaderboard.csv...")
+        # Private leaderboard typically has PassengerId and Survived columns
+        df = pd.read_csv(private_leaderboard_path)
+        df.to_csv(test_answer_path, index=False)
 
     # --- B. Define the Factory ---
     # This ensures every GEPA trial gets a fresh Agent with a clean Journal
