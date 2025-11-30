@@ -93,7 +93,24 @@ class MLEDojoGEPAAdapter(GEPAAdapter):
                 
                 # Execute in Gym using the MLE-Dojo action API
                 # MLE-Dojo envs use action="execute_code" with code=<code_string> as kwarg
-                obs, reward, terminated, truncated, info = env.step(action="execute_code", code=code_to_execute)
+                try:
+                    result = env.step(action="execute_code", code=code_to_execute)
+                    if len(result) == 5:
+                        obs, reward, terminated, truncated, info = result
+                    elif len(result) == 2:
+                        obs, info = result
+                        reward = 0.0
+                        terminated = False
+                        truncated = False
+                    else:
+                        raise ValueError(f"Unexpected number of return values from env.step(): {len(result)}")
+                except Exception as e:
+                    print(f"[Adapter] Error in env.step(): {e}")
+                    obs = {"status": "FAILED", "feedback": str(e)}
+                    reward = 0.0
+                    terminated = True
+                    truncated = False
+                    info = {}
                 
                 done = terminated or truncated
                 steps += 1

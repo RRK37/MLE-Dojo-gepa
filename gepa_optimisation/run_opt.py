@@ -106,13 +106,16 @@ def main():
         # 1. Create a fresh Journal for this episode
         fresh_journal = Journal() 
         
-        # 2. Instantiate the agent with the injected prompt
+        # 2. Agent needs data_dir pointing to public data subdirectory
+        agent_data_dir = os.path.join(data_dir, "public")
+        
+        # 3. Instantiate the agent with the injected prompt
         return Agent(
             task_desc=task_desc,
             cfg=cfg,
             journal=fresh_journal,
             higher_is_better=True, # Depends on metric (RMSE is False, Accuracy is True)
-            data_dir=data_dir,
+            data_dir=agent_data_dir,  # Point to public/ subdirectory where train.csv, test.csv are
             output_dir=output_dir,
             system_prompt=system_prompt # <--- The GEPA optimization target
         )
