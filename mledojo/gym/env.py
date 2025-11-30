@@ -300,8 +300,15 @@ class KaggleEnvironment(gym.Env):
         Returns:
             Dictionary containing the current observation state
         """
+        # Extract execution status separately from overall status
+        # This is useful for determining if code ran without errors, even if no submission was produced
+        execution_status = None
+        if "execution" in result and isinstance(result["execution"], dict):
+            execution_status = result["execution"].get("status")
+        
         return {
             "action_status": result.get("status"),
+            "execution_status": execution_status,  # Status of code execution specifically
             "feedback": feedback,
             "current_raw_score": self.current_raw_score,
             "current_position_score": self.current_position_score,

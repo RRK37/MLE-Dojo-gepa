@@ -126,28 +126,20 @@ class MLEDojoGEPAAdapter(GEPAAdapter):
                 episode_trace.append(f"Execution Output:\n{feedback_str[:500]}...")
                 
                 # Determine success based on execution status, not submission status
-                # KaggleEnvironment returns obs with "action_status" key (see _build_observation in env.py)
+                # KaggleEnvironment returns obs with "action_status" and "execution_status" keys
                 status_str = obs.get("action_status", "")
+                execution_status = obs.get("execution_status", "")
                 
                 # Check if the code executed without errors (even if no submission was produced)
                 # We consider it a success if:
                 # 1. The overall status is SUCCESS (execution AND submission both successful), OR
                 # 2. The reward is positive (got a submission score), OR
                 # 3. The execution itself succeeded (no syntax/runtime errors), even if no submission yet
-                execution_succeeded = False
-                if "feedback" in obs and isinstance(obs["feedback"], dict):
-                    for feedback_data in obs["feedback"].values():
-                        if isinstance(feedback_data, dict) and "raw_results" in feedback_data:
-                            raw_results = feedback_data["raw_results"]
-                            if "execution" in raw_results:
-                                exec_result = raw_results["execution"]
-                                if isinstance(exec_result, dict) and exec_result.get("status") == "SUCCESS":
-                                    execution_succeeded = True
-                                    break
+                execution_succeeded = (execution_status == "SUCCESS")
                 
                 is_success = (status_str == "SUCCESS" or reward > 0.0 or execution_succeeded)
                 
-                print(f"[Adapter] Step {steps}: action_status='{status_str}', reward={reward:.4f}, exec_ok={execution_succeeded}, is_success={is_success}")
+                print(f"[Adapter] Step {steps}: action_status='{status_str}', exec_status='{execution_status}', reward={reward:.4f}, is_success={is_success}")
                 
                 # Convert Gym output to the dictionary format Agent.parse_exec_result expects
                 return {
