@@ -132,7 +132,29 @@ class MLEStarAgent:
         response = self.model_client.chat_completion(messages, self.model_settings)
         cost = 0.0  # TODO: Calculate actual cost
         self.total_cost += cost
+        
+        # Ensure response is a string
+        if not isinstance(response, str):
+            logger.warning(f"query_llm received non-string response: {type(response)}, converting to string")
+            response = str(response) if response else ""
+        
         return response, cost
+    
+    def _safe_query_llm(self, system_message: str, user_message: Optional[str] = None) -> str:
+        """Safely query LLM and return just the response string."""
+        result = self.query_llm(system_message, user_message)
+        if isinstance(result, tuple):
+            response, _ = result
+        else:
+            logger.warning(f"_safe_query_llm: query_llm returned non-tuple: {type(result)}")
+            response = str(result) if result else ""
+        
+        # Ensure response is a string
+        if not isinstance(response, str):
+            logger.warning(f"_safe_query_llm: response is not a string: {type(response)}")
+            response = str(response) if response else ""
+        
+        return response
     
     def search_web(self, query: str) -> str:
         """Search web using Perplexity API (synchronous for Jupyter compatibility)."""
@@ -265,15 +287,7 @@ class MLEStarAgent:
         search_result = self.search_web(query)  # Now synchronous
         
         prompt = prompts.prompt_1_model_retrieval(self.task_desc, M)
-        result = self.query_llm(prompt)
-        
-        # Ensure we properly unpack the tuple
-        if isinstance(result, tuple):
-            response, _ = result
-        else:
-            logger.error(f"query_llm returned unexpected type: {type(result)}")
-            response = str(result) if result else ""
-        
+        response = self._safe_query_llm(prompt)
         models = self.parse_json_response(response)
         if not models:
             # Fallback: create dummy models
@@ -295,7 +309,7 @@ class MLEStarAgent:
             example_code
         )
         
-        response, _ = self.query_llm(prompt)
+        response = self._safe_query_llm(prompt)
         code = extract_code(response)
         return code if code else None
     
@@ -307,7 +321,7 @@ class MLEStarAgent:
             reference_code
         )
         
-        response, _ = self.query_llm(prompt)
+        response = self._safe_query_llm(prompt)
         code = extract_code(response)
         return code if code else None
     
@@ -318,7 +332,7 @@ class MLEStarAgent:
             "Default baseline model",
             "# Simple baseline implementation"
         )
-        response, _ = self.query_llm(prompt)
+        response = self._safe_query_llm(prompt)
         code = extract_code(response)
         if code:
             result = exec_callback(code)
@@ -414,20 +428,20 @@ class MLEStarAgent:
     def _generate_ablation_study(self, solution: str, previous_ablations: List[str]) -> Optional[str]:
         """A_abl: Generate ablation study (Prompt 4)."""
         prompt = prompts.prompt_4_ablation_study(solution, previous_ablations)
-        response, _ = self.query_llm(prompt)
+        response = self._safe_query_llm(prompt)
         code = extract_code(response)
         return code if code else None
     
     def _summarize_ablation(self, ablation_code: str, raw_result: str) -> str:
         """A_summarize: Summarize ablation results (Prompt 5)."""
         prompt = prompts.prompt_5_summarize_ablation(ablation_code, raw_result)
-        response, _ = self.query_llm(prompt)
+        response = self._safe_query_llm(prompt)
         return response
     
     def _extract_refine_plan(self, solution: str, ablation_summary: str, prev_blocks: List[str]) -> Tuple[Optional[str], Optional[str]]:
         """A_extractor: Extract code block and refinement plan (Prompt 6)."""
         prompt = prompts.prompt_6_extract_refine_plan(solution, ablation_summary, prev_blocks)
-        response, _ = self.query_llm(prompt)
+        response = self._safe_query_llm(prompt)
         
         # Parse JSON response
         plans = self.parse_json_response(response)
@@ -445,7 +459,7 @@ class MLEStarAgent:
     def _refine_code_block(self, code_block: str, plan: str) -> str:
         """A_coder: Refine code block (Prompt 7)."""
         prompt = prompts.prompt_7_refine_code_block(code_block, plan)
-        response, _ = self.query_llm(prompt)
+        response = self._safe_query_llm(prompt)
         refined = extract_code(response)
         return refined if refined else code_block
     
@@ -458,7 +472,7 @@ class MLEStarAgent:
         scores = [p[1] for p in prev_plans]
         
         prompt = prompts.prompt_8_alternative_plan(code_block, plans, scores)
-        response, _ = self.query_llm(prompt)
+        response = self._safe_query_llm(prompt)
         plan = extract_text_up_to_code(response)
         return plan if plan else None
     
@@ -524,14 +538,14 @@ class MLEStarAgent:
         scores = [p[1] for p in prev_plans]
         
         prompt = prompts.prompt_9_ensemble_plan(solutions, plans, scores)
-        response, _ = self.query_llm(prompt)
+        response = self._safe_query_llm(prompt)
         plan = extract_text_up_to_code(response)
         return plan if plan else None
     
     def _implement_ensemble(self, solutions: List[str], plan: str) -> str:
         """A_ensembler: Implement ensemble (Prompt 10)."""
         prompt = prompts.prompt_10_implement_ensemble(solutions, plan)
-        response, _ = self.query_llm(prompt)
+        response = self._safe_query_llm(prompt)
         code = extract_code(response)
         return code if code else solutions[0]
     
@@ -540,14 +554,14 @@ class MLEStarAgent:
     def _debug_code(self, code: str, error: str) -> Optional[str]:
         """Debug code with error (Prompt 11)."""
         prompt = prompts.prompt_11_debug(code, error)
-        response, _ = self.query_llm(prompt)
+        response = self._safe_query_llm(prompt)
         fixed_code = extract_code(response)
         return fixed_code if fixed_code else None
     
     def _check_data_leakage(self, code: str) -> Tuple[bool, Optional[str]]:
         """Check for data leakage (Prompt 12)."""
         prompt = prompts.prompt_12_check_leakage(code)
-        response, _ = self.query_llm(prompt)
+        response = self._safe_query_llm(prompt)
         
         answers = self.parse_json_response(response)
         if answers and len(answers) > 0:
@@ -561,14 +575,14 @@ class MLEStarAgent:
     def _fix_data_leakage(self, code: str) -> Optional[str]:
         """Fix data leakage (Prompt 13)."""
         prompt = prompts.prompt_13_fix_leakage(code)
-        response, _ = self.query_llm(prompt)
+        response = self._safe_query_llm(prompt)
         fixed_code = extract_code(response)
         return fixed_code if fixed_code else None
     
     def _check_data_usage(self, solution: str) -> Optional[str]:
         """Check if all data is used (Prompt 14)."""
         prompt = prompts.prompt_14_check_data_usage(solution, self.task_desc)
-        response, _ = self.query_llm(prompt)
+        response = self._safe_query_llm(prompt)
         
         if "All the provided information is used" in response:
             return None
