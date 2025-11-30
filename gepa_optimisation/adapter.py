@@ -71,9 +71,14 @@ class MLEDojoGEPAAdapter(GEPAAdapter):
             )
             agent = self.agent_factory(system_prompt)
             
+            # Initialize the agent's data preview (required before first step)
+            agent.update_data_preview()
+            
             obs, _ = env.reset()
             done = False
             steps = 0
+            
+            print(f"[Adapter] Environment reset, starting agent loop (max {self.max_steps} steps)")
             
             # This list will collect the "Thought Process" for GEPA to analyze
             episode_trace = [] 
@@ -112,10 +117,16 @@ class MLEDojoGEPAAdapter(GEPAAdapter):
             # 3. The Agent Loop
             while not done and steps < self.max_steps:
                 try:
+                    print(f"[Adapter] Calling agent.step() - iteration {steps + 1}/{self.max_steps}")
                     # The agent plans and generates code, then calls our bridge
                     agent.step(exec_callback=env_bridge_callback)
+                    print(f"[Adapter] agent.step() completed, journal now has {len(agent.journal.nodes)} nodes")
                 except Exception as e:
-                    episode_trace.append(f"Agent Crashed: {str(e)}")
+                    import traceback
+                    error_detail = traceback.format_exc()
+                    print(f"[Adapter] Agent crashed: {str(e)}")
+                    print(f"[Adapter] Traceback:\n{error_detail}")
+                    episode_trace.append(f"Agent Crashed: {str(e)}\n{error_detail}")
                     break
 
             # 4. Finalize
