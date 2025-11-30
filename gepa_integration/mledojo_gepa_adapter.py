@@ -78,6 +78,7 @@ class MLEDojoGEPAAdapter:
         self.base_config = base_config
         self.verbose = verbose
         self.run_counter = 0
+        self.propose_new_texts = None
         
     def evaluate(
         self,
@@ -226,6 +227,8 @@ class MLEDojoGEPAAdapter:
     def _prepare_config(self, comp_config: CompetitionConfig) -> Dict[str, Any]:
         """Prepare configuration dict for AIDE agent"""
         config = self.base_config.copy()
+
+        comp_specific_dir = os.path.join(comp_config.data_dir, comp_config.name)
         
         # Update with competition-specific settings
         config['competition']['name'] = comp_config.name

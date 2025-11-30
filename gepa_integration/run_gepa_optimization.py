@@ -223,10 +223,10 @@ def main():
         #    capture_traces=True
         #)
         
-        logger.info(f"Test evaluation completed:")
-        logger.info(f"  - Outputs: {len(eval_result['outputs'])}")
-        logger.info(f"  - Scores: {eval_result['scores']}")
-        logger.info(f"  - Trajectories: {len(eval_result['trajectories']) if eval_result['trajectories'] else 0}")
+        #logger.info(f"Test evaluation completed:")
+        #logger.info(f"  - Outputs: {len(eval_result['outputs'])}")
+        #logger.info(f"  - Scores: {eval_result['scores']}")
+        #logger.info(f"  - Trajectories: {len(eval_result['trajectories']) if eval_result['trajectories'] else 0}")
         
         # Save test results
         import json
