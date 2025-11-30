@@ -178,34 +178,43 @@ REMEMBER: You MUST create submission.csv in EVERY iteration. Without it, your sc
                 is_success = (status_str == "SUCCESS" or reward > 0.0 or execution_succeeded)
                 
                 # Extract CV score from stdout if no submission reward
-                # Look for patterns like "Cross-validated accuracy: 0.8137" or "CV score: 0.8137"
+                # Look for patterns like "5-fold cross-validation accuracy: 0.8137" in stdout
                 cv_score = 0.0
                 if reward == 0.0 and execution_succeeded:
                     # Try to extract score from execution stdout
+                    import re
+                    
+                    # Method 1: Check feedback structure
                     if "feedback" in obs and isinstance(obs["feedback"], dict):
-                        for feedback_data in obs["feedback"].values():
+                        for feedback_key, feedback_data in obs["feedback"].items():
                             if isinstance(feedback_data, dict) and "raw_results" in feedback_data:
                                 exec_result = feedback_data["raw_results"].get("execution", {})
                                 stdout_text = exec_result.get("stdout", "")
                                 
-                                # Parse patterns like "Cross-validated accuracy: 0.8137"
-                                import re
-                                patterns = [
-                                    r'Cross-validated?\s+(?:accuracy|score)[:\s]+([0-9.]+)',
-                                    r'CV\s+(?:accuracy|score)[:\s]+([0-9.]+)',
-                                    r'(?:accuracy|score)[:\s]+([0-9.]+)',
-                                ]
-                                for pattern in patterns:
-                                    match = re.search(pattern, stdout_text, re.IGNORECASE)
-                                    if match:
-                                        cv_score = float(match.group(1))
-                                        break
+                                if stdout_text:
+                                    # Parse patterns - updated to match actual output format
+                                    patterns = [
+                                        r'(\d+)-fold\s+cross-validation\s+accuracy[:\s]+([0-9.]+)',
+                                        r'Cross-validation\s+accuracy[:\s]+([0-9.]+)',
+                                        r'CV\s+accuracy[:\s]+([0-9.]+)',
+                                        r'accuracy[:\s]+([0-9.]+)',
+                                    ]
+                                    for pattern in patterns:
+                                        match = re.search(pattern, stdout_text, re.IGNORECASE)
+                                        if match:
+                                            # Get the last group (the score)
+                                            cv_score = float(match.group(match.lastindex))
+                                            print(f"[Adapter] Extracted CV score {cv_score} using pattern: {pattern}")
+                                            break
                                 if cv_score > 0:
                                     break
                     
                     # Use CV score as reward if found
                     if cv_score > 0:
                         reward = cv_score
+                        print(f"[Adapter] Using CV score as reward: {reward:.4f}")
+                    else:
+                        print(f"[Adapter] No CV score found in execution output")
                 
                 print(f"[Adapter] Step {steps}: action_status='{status_str}', exec_status='{execution_status}', reward={reward:.4f}, is_success={is_success}")
                 
