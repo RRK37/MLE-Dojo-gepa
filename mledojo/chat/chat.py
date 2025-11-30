@@ -211,17 +211,49 @@ class ChatClient:
                         UnprocessableEntityError as AnthropicUnprocessableEntityError,
                         InternalServerError as AnthropicInternalServerError,
                     )
-                    response = self.client.messages.create(
-                        model=self.model_name,
-                        messages=messages,
-                        max_tokens=settings.max_completion_tokens,
-                        temperature=settings.temperature,
-                        top_p=settings.top_p,
-                    )
+                    
+                    # Claude requires system message as a separate parameter
+                    system_message = None
+                    claude_messages = []
+                    
+                    for msg in messages:
+                        if msg["role"] == "system":
+                            system_message = msg["content"]
+                        else:
+                            claude_messages.append(msg)
+                    
+                    # Build request parameters
+                    request_params = {
+                        "model": self.model_name,
+                        "messages": claude_messages,
+                        "max_tokens": settings.max_completion_tokens,
+                        "temperature": settings.temperature,
+                        "top_p": settings.top_p,
+                    }
+                    
+                    # Add system message if present
+                    if system_message:
+                        request_params["system"] = system_message
+                    
+                    response = self.client.messages.create(**request_params)
+                    
                     # Anthropic returns text in a different field
                     response_text = response.content[0].text
-                    cost = 0.0  # Or implement your own cost logic
-
+                    
+                    # Calculate cost based on token usage
+                    input_tokens = response.usage.input_tokens
+                    output_tokens = response.usage.output_tokens
+                    
+                    # Claude pricing (as of late 2024)
+                    # Claude 3.5 Sonnet: $3 per million input tokens, $15 per million output tokens
+                    # Claude Sonnet 4: Similar pricing structure
+                    input_cost_per_1m = 3.0
+                    output_cost_per_1m = 15.0
+                    
+                    cost = (input_tokens / 1_000_000 * input_cost_per_1m + 
+                           output_tokens / 1_000_000 * output_cost_per_1m)
+                    
+                    self.total_cost += cost
                     return response_text, cost
 
                 # ---------------------------
@@ -332,17 +364,17 @@ class ChatClient:
 
                     elif isinstance(e, AnthropicAPIStatusError):
                         if isinstance(e, AnthropicBadRequestError):
-                            raise Exception(f"Bad request: {e.status_code}") from e
+                            raise Exception(f"Bad request: {e.status_code} - {str(e)}") from e
                         elif isinstance(e, AnthropicAuthError):
-                            raise Exception(f"Authentication failed: {e.status_code}") from e
+                            raise Exception(f"Authentication failed: {e.status_code} - {str(e)}") from e
                         elif isinstance(e, AnthropicPermissionDeniedError):
-                            raise Exception(f"Permission denied: {e.status_code}") from e
+                            raise Exception(f"Permission denied: {e.status_code} - {str(e)}") from e
                         elif isinstance(e, AnthropicNotFoundError):
-                            raise Exception(f"Resource not found: {e.status_code}") from e
+                            raise Exception(f"Resource not found: {e.status_code} - {str(e)}") from e
                         elif isinstance(e, AnthropicUnprocessableEntityError):
-                            raise Exception(f"Unprocessable entity: {e.status_code}") from e
+                            raise Exception(f"Unprocessable entity: {e.status_code} - {str(e)}") from e
                         else:
-                            raise Exception(f"API error: {e.status_code}") from e
+                            raise Exception(f"API error: {e.status_code} - {str(e)}") from e
                 else:
                     if isinstance(e, (OpenAIApiConnectionError, OpenAIRateLimitError, OpenAITimeoutError, OpenAIInternalServerError)):
                         attempt += 1

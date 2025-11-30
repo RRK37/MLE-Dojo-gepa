@@ -178,6 +178,13 @@ class Agent:
         """Query the LLM model."""
         system_message=compile_prompt_to_md(system_message) if system_message else None
         user_message=compile_prompt_to_md(user_message) if user_message else None
+        
+        # If no user message provided but we have a system message, treat the system message as user message
+        # This is common in AIDE where the entire prompt is passed as system_message
+        if system_message and not user_message:
+            user_message = system_message
+            system_message = None
+        
         messages = opt_messages_to_list(system_message, user_message)
         # Check if messages conform to OpenAI standard message format
         # Each message should be a dict with 'role' and 'content' keys

@@ -38,17 +38,28 @@ agent:
   # whether to provide the agent with a preview of the data
   data_preview: True
 
-  # LLM settings for coding
+  # # LLM settings for coding
+  # code:
+  #   model_mode: gpt
+  #   model_name: gpt-4o-mini
+  #   port: 8314  # Port for local model
+  #   max_completion_tokens: 8192  # Maximum tokens for completion
+  #   max_prompt_tokens: 30000 
+  #   api_idx: -1
+  #   api_key: null # use environment variable OPENAI_API_KEY
+  #   temperature: 0.0
+  #   top_p: 1.0
+
   code:
-    model_mode: gpt
-    model_name: gpt-4o-mini
-    port: 8314  # Port for local model
-    max_completion_tokens: 8192  # Maximum tokens for completion
-    max_prompt_tokens: 30000 
-    api_idx: -1
-    api_key: null # use environment variable OPENAI_API_KEY
-    temperature: 0.0
-    top_p: 1.0
+      model_mode: claude
+      model_name: claude-sonnet-4-20250514  # or claude-sonnet-3-5-20241022
+      port: 8314  # Not used for Claude, but keep for compatibility
+      max_completion_tokens: 8192
+      max_prompt_tokens: 30000 
+      api_idx: -1
+      api_key: null  # Will use ANTHROPIC_API_KEY environment variable
+      temperature: 0.0
+      top_p: 1.0
 
   # hyperparameters for the tree search
   search:
