@@ -9,7 +9,7 @@ import os
 import sys
 import json
 import logging
-from typing import Any, Dict, List, Mapping, Sequence
+from typing import Any, Dict, List, Mapping, Sequence, Optional
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -31,7 +31,7 @@ class CompetitionConfig:
     """Configuration for a single competition run (DataInst type)"""
     name: str
     data_dir: str
-    max_steps: int = 5  # Reduced for faster GEPA iterations
+    max_steps: int = 5
     execution_timeout: int = 3600
     output_dir: str = None
     
@@ -43,7 +43,7 @@ class CompetitionConfig:
 @dataclass  
 class ExecutionTrajectory:
     """Trajectory data captured from AIDE agent run"""
-    journal_export: Dict  # Full journal serialized
+    journal_export: Dict
     conversation_history: List[Dict]
     cost_history: List[Dict]
     final_score: float
@@ -51,12 +51,22 @@ class ExecutionTrajectory:
     num_good_nodes: int
     num_buggy_nodes: int
     failure_patterns: List[str]
-    
-    
+
+
+@dataclass
+class GEPAEvaluationResult:
+    """
+    Return object required by GEPA's evaluator.
+    Must have 'outputs' and 'scores' attributes.
+    """
+    outputs: List[Any]
+    scores: List[float]
+    trajectories: Optional[List[ExecutionTrajectory]] = None
+
+
 class MLEDojoGEPAAdapter:
     """
     GEPA Adapter for MLE-Dojo AIDE Agent.
-    
     Implements the GEPAAdapter protocol to optimize AIDE agent prompts.
     """
     
@@ -65,13 +75,6 @@ class MLEDojoGEPAAdapter:
         base_config: Dict[str, Any],
         verbose: bool = True
     ):
-        """
-        Initialize the adapter.
-        
-        Args:
-            base_config: Base configuration for AIDE agent (from config.yaml)
-            verbose: Whether to log detailed information
-        """
         self.base_config = base_config
         self.verbose = verbose
         self.run_counter = 0
@@ -81,21 +84,9 @@ class MLEDojoGEPAAdapter:
         batch: List[CompetitionConfig],
         candidate: Dict[str, str],
         capture_traces: bool = False,
-    ) -> Dict[str, Any]:
+    ) -> GEPAEvaluationResult:
         """
         Evaluate a candidate prompt configuration on a batch of competitions.
-        
-        Args:
-            batch: List of competition configurations to run
-            candidate: Dict mapping component names to prompt text
-                      Expected keys: 'introduction_draft', 'introduction_improve', 'introduction_debug'
-            capture_traces: Whether to capture detailed execution traces
-            
-        Returns:
-            EvaluationBatch-like dict with:
-                - outputs: List of final submission results
-                - scores: List of position scores (higher is better)
-                - trajectories: List of ExecutionTrajectory objects (if capture_traces=True)
         """
         outputs = []
         scores = []
@@ -125,7 +116,7 @@ class MLEDojoGEPAAdapter:
                 
             except Exception as e:
                 logger.error(f"Failed to evaluate {comp_config.name}: {e}")
-                # On failure, assign score of 0 and capture error
+                # On failure, assign score of 0
                 outputs.append({'error': str(e)})
                 scores.append(0.0)
                 
@@ -141,11 +132,12 @@ class MLEDojoGEPAAdapter:
                         failure_patterns=[str(e)]
                     ))
         
-        return {
-            'outputs': outputs,
-            'scores': scores,
-            'trajectories': trajectories
-        }
+        # FIX: Return the specific object GEPA expects, not a dict
+        return GEPAEvaluationResult(
+            outputs=outputs,
+            scores=scores,
+            trajectories=trajectories
+        )
     
     def _run_aide_agent(
         self,
@@ -156,27 +148,27 @@ class MLEDojoGEPAAdapter:
     ) -> Dict[str, Any]:
         """
         Run AIDE agent with custom prompts on a single competition.
-        
-        Returns dict with 'output', 'score', and optionally 'trajectory'
         """
         # Prepare configuration
         config = self._prepare_config(comp_config)
         
         # Determine competition data path
-        # Assumes structure: <data_dir>/<competition_name>/data/
         comp_data_path = os.path.join(comp_config.data_dir, comp_config.name, "data")
         
-        # Get metric class and determine higher_is_better
-        metric_class = get_metric(comp_config.name)
-        higher_is_better = metric_class().higher_is_better
+        # Get metric class
+        try:
+            metric_class = get_metric(comp_config.name)
+            higher_is_better = metric_class().higher_is_better
+        except Exception as e:
+            logger.warning(f"Could not load metric for {comp_config.name}, defaulting to True: {e}")
+            metric_class = None
+            higher_is_better = True
         
-        # Create registry and register the competition
-        # This is required because KaggleEnvironment expects a registry instance
         registry = CompetitionRegistry(
             name=comp_config.name,
             data_dir=comp_data_path,
             comp_info=CompInfo(
-                category="Tabular",  # Defaulting, could be inferred if needed
+                category="Tabular",
                 level="intermediate",
                 output_type="submission.csv",
                 higher_is_better=higher_is_better
@@ -189,7 +181,7 @@ class MLEDojoGEPAAdapter:
             competition_name=comp_config.name,
             output_dir=config['output_dir'],
             competition_registry=registry,
-            render_mode=config['env']['render_mode']
+            render_mode=config['env'].get('render_mode', None)
         )
         
         # Setup AIDE agent with custom prompts
@@ -202,7 +194,6 @@ class MLEDojoGEPAAdapter:
         for step in range(comp_config.max_steps):
             try:
                 def exec_callback(code: str) -> Dict:
-                    """Execute code in environment"""
                     obs, reward = env.step("execute_code", **{"code": code})
                     return obs
                 
@@ -243,6 +234,17 @@ class MLEDojoGEPAAdapter:
         config['env']['execution_timeout'] = comp_config.execution_timeout
         config['output_dir'] = comp_config.output_dir
         
+        # FIX: Dynamically set the description file path
+        # Otherwise it uses the hardcoded path from base config (e.g. Titanic)
+        desc_path = os.path.join(comp_config.data_dir, comp_config.name, "data", "public", "description.txt")
+        
+        if os.path.exists(desc_path):
+            config['desc_file'] = desc_path
+        else:
+            # Clear it so it doesn't default to the wrong competition
+            config['desc_file'] = None
+            logger.warning(f"Description file not found at {desc_path}")
+            
         return config
     
     def _build_trajectory(
@@ -251,14 +253,12 @@ class MLEDojoGEPAAdapter:
         agent: Agent,
         final_score: float
     ) -> ExecutionTrajectory:
-        """Build trajectory object from journal and agent state"""
         
-        # Get failure patterns
         failure_patterns = []
         for node in journal.buggy_nodes:
             if node.feedback:
                 err_msg = str(node.feedback.get('error', 'Unknown error'))
-                failure_patterns.append(err_msg[:200])  # Truncate long errors
+                failure_patterns.append(err_msg[:200])
         
         return ExecutionTrajectory(
             journal_export=journal.export_for_gepa(),
@@ -274,22 +274,15 @@ class MLEDojoGEPAAdapter:
     def make_reflective_dataset(
         self,
         candidate: Dict[str, str],
-        eval_batch: Dict[str, Any],
+        eval_batch: GEPAEvaluationResult, # Updated type hint
         components_to_update: List[str],
     ) -> Mapping[str, Sequence[Mapping[str, Any]]]:
         """
         Build reflective dataset for GEPA's instruction proposer.
-        
-        Args:
-            candidate: The prompts that were evaluated
-            eval_batch: Result from evaluate() with trajectories
-            components_to_update: Which prompt components to optimize
-            
-        Returns:
-            Dict mapping component name to list of reflective examples
         """
-        trajectories = eval_batch['trajectories']
-        scores = eval_batch['scores']
+        # Access attributes directly now
+        trajectories = eval_batch.trajectories
+        scores = eval_batch.scores
         
         if not trajectories:
             return {comp: [] for comp in components_to_update}
@@ -300,8 +293,7 @@ class MLEDojoGEPAAdapter:
             examples = []
             
             for traj, score in zip(trajectories, scores):
-                # Focus on failures and low-scoring runs for reflection
-                if score < 0.5:  # Threshold for "low performance"
+                if score < 0.5:
                     example = self._build_reflective_example(
                         component=component,
                         trajectory=traj,
@@ -310,7 +302,7 @@ class MLEDojoGEPAAdapter:
                     )
                     examples.append(example)
             
-            reflective_dataset[component] = examples[:10]  # Limit to top 10 failures
+            reflective_dataset[component] = examples[:10]
         
         return reflective_dataset
     
@@ -321,9 +313,7 @@ class MLEDojoGEPAAdapter:
         score: float,
         current_prompt: str
     ) -> Dict[str, Any]:
-        """Build a single reflective example for a component"""
         
-        # Extract relevant information based on component type
         if 'draft' in component:
             stage = 'drafting'
         elif 'improve' in component:
@@ -335,13 +325,11 @@ class MLEDojoGEPAAdapter:
         
         feedback_parts = []
         
-        # Add failure patterns
         if trajectory.failure_patterns:
             feedback_parts.append(
                 f"Common errors: {'; '.join(trajectory.failure_patterns[:3])}"
             )
         
-        # Add performance metrics
         feedback_parts.append(
             f"Achieved only {trajectory.num_good_nodes} good solutions out of "
             f"{trajectory.num_good_nodes + trajectory.num_buggy_nodes} attempts"
@@ -352,7 +340,7 @@ class MLEDojoGEPAAdapter:
         return {
             "Inputs": {
                 "stage": stage,
-                "current_prompt": current_prompt[:500],  # Truncate for brevity
+                "current_prompt": current_prompt[:500],
             },
             "Generated Outputs": {
                 "num_good_nodes": trajectory.num_good_nodes,
