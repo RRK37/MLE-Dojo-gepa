@@ -9,6 +9,7 @@ import os
 import sys
 import json
 import logging
+import traceback
 from typing import Any, Dict, List, Mapping, Sequence, Optional
 from dataclasses import dataclass
 from pathlib import Path
@@ -25,6 +26,8 @@ from mledojo.utils import load_config, create_config_from_args, get_metric
 
 logger = logging.getLogger("gepa_mledojo")
 
+# Verification print to confirm module reload
+print("DEBUG: Loaded updated MLEDojoGEPAAdapter module v2", file=sys.stderr)
 
 @dataclass
 class CompetitionConfig:
@@ -78,7 +81,6 @@ class MLEDojoGEPAAdapter:
         self.base_config = base_config
         self.verbose = verbose
         self.run_counter = 0
-        # Initialize this attribute to None to satisfy GEPA checks
         self.propose_new_texts = None
         
     def evaluate(
@@ -94,7 +96,7 @@ class MLEDojoGEPAAdapter:
         scores = []
         trajectories = [] if capture_traces else None
         
-        logger.info(f"Evaluating candidate on {len(batch)} competitions")
+        print(f"DEBUG: Evaluating batch of {len(batch)} competitions", file=sys.stderr)
         
         for comp_config in batch:
             self.run_counter += 1
@@ -117,12 +119,10 @@ class MLEDojoGEPAAdapter:
                 logger.info(f"{run_id} | {comp_config.name} | Score: {result['score']:.4f}")
                 
             except Exception as e:
-                # Log traceback for debugging
-                import traceback
-                logger.error(f"Failed to evaluate {comp_config.name}: {e}")
-                logger.error(traceback.format_exc())
+                err_msg = f"Failed to evaluate {comp_config.name}: {e}"
+                print(f"ERROR: {err_msg}", file=sys.stderr)
+                traceback.print_exc()
                 
-                # On failure, assign score of 0
                 outputs.append({'error': str(e)})
                 scores.append(0.0)
                 
@@ -135,7 +135,7 @@ class MLEDojoGEPAAdapter:
                         best_score=0.0,
                         num_good_nodes=0,
                         num_buggy_nodes=0,
-                        failure_patterns=[f"System Error: {str(e)}"]
+                        failure_patterns=[str(e)]
                     ))
         
         return GEPAEvaluationResult(
@@ -155,6 +155,7 @@ class MLEDojoGEPAAdapter:
         Run AIDE agent with custom prompts on a single competition.
         """
         # Prepare configuration
+        print(f"DEBUG: Preparing config for {comp_config.name}", file=sys.stderr)
         config = self._prepare_config(comp_config)
         
         # Determine competition data path
@@ -191,6 +192,7 @@ class MLEDojoGEPAAdapter:
         )
         
         # Setup AIDE agent with custom prompts
+        print(f"DEBUG: Setting up AIDE agent with desc_file: {config.get('desc_file')}", file=sys.stderr)
         agent, journal, cfg = setup_aide_agent(
             config=config,
             custom_prompts=custom_prompts
@@ -233,69 +235,50 @@ class MLEDojoGEPAAdapter:
         """Prepare configuration dict for AIDE agent"""
         config = self.base_config.copy()
         
-        # Resolve paths to absolute to avoid ambiguity
+        # Resolve paths
         cwd = os.getcwd()
         abs_data_dir = os.path.abspath(comp_config.data_dir)
         comp_root_dir = os.path.join(abs_data_dir, comp_config.name)
         
-        logger.info(f"Preparing config for {comp_config.name}")
-        logger.info(f"CWD: {cwd}")
-        logger.info(f"Comp root dir: {comp_root_dir}")
-        
-        # Debug: Check if directory exists and list content
-        if os.path.exists(comp_root_dir):
-            try:
-                contents = os.listdir(comp_root_dir)
-                logger.info(f"Contents of {comp_root_dir}: {contents}")
-                
-                # Check inside 'data' if it exists
-                data_sub = os.path.join(comp_root_dir, "data")
-                if os.path.exists(data_sub):
-                    logger.info(f"Contents of {data_sub}: {os.listdir(data_sub)}")
-                    
-                    # Check inside 'public' if it exists
-                    public_sub = os.path.join(data_sub, "public")
-                    if os.path.exists(public_sub):
-                        logger.info(f"Contents of {public_sub}: {os.listdir(public_sub)}")
-            except Exception as e:
-                logger.warning(f"Could not list directory contents: {e}")
-        else:
-            logger.error(f"Competition root directory NOT FOUND: {comp_root_dir}")
+        print(f"DEBUG: CWD={cwd}, DataDir={abs_data_dir}, CompRoot={comp_root_dir}", file=sys.stderr)
 
         config['competition']['name'] = comp_config.name
         config['competition']['data_dir'] = comp_root_dir
         
-        # 3. Robustly find the description file
-        possible_paths = [
+        # SEARCH LOGIC
+        # We try strict structure first: .../data/public/description.txt
+        # Then fallback: .../public/description.txt
+        # Then fallback: .../description.txt
+        
+        path_options = [
             os.path.join(comp_root_dir, "data", "public", "description.txt"),
             os.path.join(comp_root_dir, "public", "description.txt"),
             os.path.join(comp_root_dir, "description.txt"),
+            # Also try without the intermediate 'data' folder just in case
+            os.path.join(abs_data_dir, comp_config.name, "public", "description.txt")
         ]
         
         desc_path = None
-        for path in possible_paths:
-            if os.path.exists(path):
-                desc_path = path
-                logger.info(f"Found description file at: {path}")
+        for p in path_options:
+            if os.path.exists(p):
+                desc_path = p
+                print(f"DEBUG: Found description at {p}", file=sys.stderr)
                 break
-                
+        
         if desc_path:
             config['desc_file'] = desc_path
         else:
-            logger.error(f"FILE MISSING: Could not find description.txt in {comp_root_dir}")
+            print(f"ERROR: Description file NOT FOUND. Checked: {path_options}", file=sys.stderr)
             
-            # FALLBACK: Create a dummy description file so the agent doesn't crash on startup.
-            # This allows the agent to start, inspect the file system, and potentially recover.
-            dummy_desc_path = os.path.join(config['output_dir'], f"{comp_config.name}_description.txt")
-            os.makedirs(os.path.dirname(dummy_desc_path), exist_ok=True)
-            
-            with open(dummy_desc_path, 'w') as f:
+            # FORCE FALLBACK: Create dummy file
+            dummy_path = os.path.join(comp_config.output_dir, "description.txt")
+            os.makedirs(os.path.dirname(dummy_path), exist_ok=True)
+            with open(dummy_path, 'w') as f:
                 f.write(f"Task: {comp_config.name}\n")
-                f.write("Please inspect the data files in the competition directory to understand the task.\n")
-                f.write(f"The data should be located at: {comp_root_dir}\n")
+                f.write("Please explore the data directory to understand the task.\n")
             
-            logger.warning(f"Using synthetic description file: {dummy_desc_path}")
-            config['desc_file'] = dummy_desc_path
+            print(f"DEBUG: Created dummy description at {dummy_path}", file=sys.stderr)
+            config['desc_file'] = dummy_path
             
         config['env']['max_steps'] = comp_config.max_steps
         config['env']['execution_timeout'] = comp_config.execution_timeout
