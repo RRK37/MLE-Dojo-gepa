@@ -1,33 +1,71 @@
-import gymnasium as gym
-from gepa.core import GEPAAdapter, Candidate
+from gepa import GEPAAdapter, EvaluationBatch
 from typing import Callable, Any
+from mledojo.gym.env import KaggleEnvironment
+from mledojo.gym.competition import CompetitionRegistry, CompInfo
+from mledojo.competitions import get_metric
 
 class MLEDojoGEPAAdapter(GEPAAdapter):
-    def __init__(self, task_name: str, agent_factory: Callable[[str], Any], max_steps: int = 10):
+    def __init__(self, 
+                 competition_name: str,
+                 data_dir: str,
+                 output_dir: str,
+                 agent_factory: Callable[[str], Any], 
+                 max_steps: int = 10,
+                 execution_timeout: int = 600,
+                 score_mode: str = "position"):
         """
         Args:
-            task_name: The MLE-Dojo gym environment ID.
+            competition_name: The Kaggle competition name (e.g., 'titanic').
+            data_dir: Path to competition data directory.
+            output_dir: Path to output directory for env results.
             agent_factory: A function that takes `system_prompt` and returns a FRESH Agent instance.
             max_steps: Safety limit for agent iterations per episode.
+            execution_timeout: Timeout for code execution in seconds.
+            score_mode: Scoring mode ('position' or 'raw').
         """
-        self.task_name = task_name
+        self.competition_name = competition_name
+        self.data_dir = data_dir
+        self.output_dir = output_dir
         self.agent_factory = agent_factory
         self.max_steps = max_steps
+        self.execution_timeout = execution_timeout
+        self.score_mode = score_mode
 
-    def evaluate(self, candidate: Candidate, num_episodes: int = 1) -> dict:
+    def evaluate(self, batch: list, candidate: dict[str, str], capture_traces: bool = False) -> EvaluationBatch:
         """
         Runs the agent against the environment using the candidate prompt.
         """
-        # 1. Get the new prompt from GEPA
-        system_prompt = candidate.text_components['system_prompt']
+        # 1. Get the new prompt from GEPA (candidate is a dict, not an object)
+        system_prompt = candidate['system_prompt']
         
-        # 2. Run Episodes
+        # 2. Run Episodes (1 episode per batch item, or default to 1 if batch is empty)
+        num_episodes = len(batch) if batch else 1
         total_score = 0
         full_traces = []
+        rollout_outputs = []
 
-        for _ in range(num_episodes):
+        for episode_idx in range(num_episodes):
             # Create a fresh environment and agent for this run
-            env = gym.make(self.task_name)
+            # Setup competition registry
+            competition_registry = CompetitionRegistry()
+            comp_info = CompInfo()
+            metric_class = get_metric(self.competition_name)
+            
+            competition_registry.register(
+                self.competition_name,
+                data_dir=self.data_dir,
+                comp_info=comp_info,
+                metric_class=metric_class
+            )
+            
+            env = KaggleEnvironment(
+                competition_name=self.competition_name,
+                output_dir=self.output_dir,
+                competition_registry=competition_registry,
+                render_mode=None,
+                execution_timeout=self.execution_timeout,
+                score_mode=self.score_mode
+            )
             agent = self.agent_factory(system_prompt)
             
             obs, _ = env.reset()
@@ -45,24 +83,27 @@ class MLEDojoGEPAAdapter(GEPAAdapter):
                 episode_trace.append(f"\n--- Step {steps} ---")
                 episode_trace.append(f"Generated Code:\n{code_to_execute[:500]}...") # Truncate for brevity in logs
                 
-                # Execute in Gym
-                # Note: MLE-Dojo envs typically expect code as the action
-                obs, reward, terminated, truncated, info = env.step(code_to_execute)
+                # Execute in Gym using the MLE-Dojo action API
+                # MLE-Dojo envs use action="execute_code" with code=<code_string> as kwarg
+                obs, reward, terminated, truncated, info = env.step(action="execute_code", code=code_to_execute)
                 
                 done = terminated or truncated
                 steps += 1
                 
                 # Log the result
-                feedback_str = str(obs)
+                feedback_str = str(obs.get("feedback", obs))
                 episode_trace.append(f"Execution Output:\n{feedback_str[:500]}...")
                 
-                # Convert Gym output to the dictionary format your Agent.parse_exec_result expects
-                # Adjust keys 'action_status', 'feedback', 'current_position_score' based on your specific Agent logic
+                # Determine success based on execution status in observation
+                status_str = obs.get("status", "FAILED")
+                is_success = status_str == "SUCCESS" or status_str == "success"
+                
+                # Convert Gym output to the dictionary format Agent.parse_exec_result expects
                 return {
-                    "action_status": "SUCCESS" if not "Error" in feedback_str else "FAILED",
-                    "feedback": feedback_str,
-                    "current_raw_score": info.get("score", 0.0),
-                    "current_position_score": reward, # Assuming reward is the metric we care about
+                    "action_status": "SUCCESS" if is_success else "FAILED",
+                    "feedback": obs,  # Pass full observation dict as feedback
+                    "current_raw_score": info.get("raw_score", reward),
+                    "current_position_score": reward,  # Reward is the position score
                 }
 
             # 3. The Agent Loop
@@ -85,14 +126,23 @@ class MLEDojoGEPAAdapter(GEPAAdapter):
                     final_score = best_node.metric.value
 
             total_score += final_score
-            full_traces.append("\n".join(episode_trace))
+            trace_str = "\n".join(episode_trace) if capture_traces else ""
+            full_traces.append(trace_str)
+            
+            # Store rollout output for this episode
+            rollout_outputs.append({
+                "score": final_score,
+                "trace": trace_str,
+                "metadata": {"competition": self.competition_name, "episode": episode_idx}
+            })
             
             env.close()
 
         avg_score = total_score / num_episodes
 
-        return {
-            "score": avg_score,
-            "traces": full_traces,
-            "metadata": {"task": self.task_name}
-        }
+        # Return EvaluationBatch as expected by GEPA
+        return EvaluationBatch(
+            rollout_outputs=rollout_outputs,
+            aggregated_score=avg_score,
+            traces=full_traces if capture_traces else None
+        )

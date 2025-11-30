@@ -10,29 +10,65 @@ sys.path.append(project_root)
 # 2. Imports
 from gepa import optimize
 from gepa_optimisation.adapter import MLEDojoGEPAAdapter
+from omegaconf import OmegaConf
 
 # Import your agent and its dependencies
-from existing_agent_code.agent import Agent
+from mledojo.agent.aide.agent import Agent
 from mledojo.agent.aide.journal import Journal
-from mledojo.agent.aide.utils.config import Config
+from mledojo.agent.aide.utils.config import Config, StageConfig, SearchConfig, AgentConfig, ExecConfig
 
 # 3. Configuration & Factory
 def main():
     # --- A. Setup Static Configuration ---
-    # Load your config (mocking typical values here, adjust to your needs)
-    # If you use hydra, load it properly here.
-    cfg = Config(
-        agent={"code": {"model_name": "gpt-4o", "model_mode": "gpt", "api_key": os.getenv("OPENAI_API_KEY")},
-               "search": {"num_drafts": 2, "debug_prob": 0.2, "max_debug_depth": 3},
-               "expose_prediction": True, "k_fold_validation": 5},
-        exec={"timeout": 600},
-        workspace_dir="./workspace"
-    )
+    # Build config using OmegaConf for proper structure
+    cfg_dict = {
+        "data_dir": "./input",
+        "desc_file": None,
+        "name": "gepa-optimization",
+        "goal": "Optimize system prompt for best competition performance",
+        "eval": None,
+        "log_dir": "./logs",
+        "workspace_dir": "./workspace",
+        "preprocess_data": False,
+        "copy_data": False,
+        "exp_name": "gepa_opt",
+        "generate_report": False,
+        "agent": {
+            "steps": 10,
+            "k_fold_validation": 5,
+            "expose_prediction": True,
+            "data_preview": True,
+            "code": {
+                "model_name": "gpt-4o",
+                "model_mode": "gpt",
+                "port": 8314,
+                "max_completion_tokens": 8192,
+                "max_prompt_tokens": 30000,
+                "api_idx": 0,
+                "api_key": os.getenv("OPENAI_API_KEY"),
+                "temperature": 0.7,
+                "top_p": None
+            },
+            "search": {
+                "num_drafts": 2,
+                "debug_prob": 0.2,
+                "max_debug_depth": 3
+            }
+        },
+        "exec": {
+            "timeout": 600,
+            "agent_file_name": None,
+            "format_tb_ipython": False
+        }
+    }
+    cfg_schema = OmegaConf.structured(Config)
+    cfg = OmegaConf.merge(cfg_schema, OmegaConf.create(cfg_dict))
     
-    task_desc = "Predict house prices based on the provided dataset. Optimize for RMSE."
-    task_name = "mle-dojo/house-prices-v1" # Replace with your target env ID
-    data_dir = "./input"
+    # Competition and environment settings
+    competition_name = "titanic"  # Replace with your competition name
+    data_dir = "./data/prepared/titanic"  # Path to competition data
     output_dir = "./output"
+    task_desc = "Predict survival on the Titanic. Optimize for accuracy."
 
     # --- B. Define the Factory ---
     # This ensures every GEPA trial gets a fresh Agent with a clean Journal
@@ -53,9 +89,13 @@ def main():
 
     # --- C. Initialize Adapter ---
     adapter = MLEDojoGEPAAdapter(
-        task_name=task_name,
+        competition_name=competition_name,
+        data_dir=data_dir,
+        output_dir=output_dir,
         agent_factory=agent_factory,
-        max_steps=8 # Limit steps to save tokens during optimization
+        max_steps=8,  # Limit steps to save tokens during optimization
+        execution_timeout=600,
+        score_mode="position"
     )
 
     # --- D. Configure Initial Prompt ---
@@ -63,7 +103,7 @@ def main():
     seed_candidate = {'system_prompt': initial_prompt}
 
     # --- E. Run Optimization ---
-    print(f"Starting GEPA Optimization on {task_name}...")
+    print(f"Starting GEPA Optimization on {competition_name}...")
     
     result = optimize(
         seed_candidate=seed_candidate,
@@ -81,12 +121,12 @@ def main():
     print(f"Best Score: {result.best_score}")
     print("Best System Prompt:")
     print("-" * 20)
-    print(result.best_candidate.text_components['system_prompt'])
+    print(result.best_candidate['system_prompt'])
     print("-" * 20)
     
     # Optional: Save the best prompt to a file
     with open("best_prompt.txt", "w") as f:
-        f.write(result.best_candidate.text_components['system_prompt'])
+        f.write(result.best_candidate['system_prompt'])
 
 if __name__ == "__main__":
     main()
