@@ -28,7 +28,8 @@ from rich.status import Status
 logger = logging.getLogger("aide_setup")
 
 def setup_aide_agent(
-    config: Dict[str, Any], 
+    config: Dict[str, Any],
+    custom_prompts: Dict[str, str] | None = None,
 ) -> Tuple[Agent, Journal, Any]:
     """
     Set up an AIDE Agent based on configuration.
@@ -39,8 +40,8 @@ def setup_aide_agent(
     
     Args:
         config: Configuration dictionary containing agent and competition settings
-        competition_name: Name of the Kaggle competition
-        output_dir: Directory where outputs will be stored
+        custom_prompts: Optional dict of custom prompts for GEPA integration
+                       Keys: 'introduction_draft', 'introduction_improve', 'introduction_debug'
         
     Returns:
         Tuple containing:
@@ -79,14 +80,15 @@ def setup_aide_agent(
     metric_class = get_metric(config['competition']['name'])
     higher_is_better = metric_class().higher_is_better
     
-    # Create the agent
+    # Create the agent (with optional custom prompts)
     agent = Agent(
         task_desc=task_desc,
         cfg=cfg,
         journal=journal,
         higher_is_better=higher_is_better,
         data_dir=os.path.join(cfg.workspace_dir, "input"),
-        output_dir=cfg.workspace_dir
+        output_dir=cfg.workspace_dir,
+        custom_prompts=custom_prompts
     )
     
     logger.info(f"AIDE agent set up for competition: {config['competition']['name']}")

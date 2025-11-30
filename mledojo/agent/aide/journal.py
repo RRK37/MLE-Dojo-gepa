@@ -10,7 +10,7 @@ The journal is the core datastructure in AIDE that contains:
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import Literal, Optional, Dict
+from typing import Literal, Optional, Dict, List
 
 from dataclasses_json import DataClassJsonMixin
 from mledojo.agent.aide.utils.metric import MetricValue
@@ -227,3 +227,44 @@ class Journal(DataClassJsonMixin):
             #     summary_part += f"Best Position Score: {n.best_position_score}\n"
             summary.append(summary_part)
         return "\n-------------------------------\n".join(summary)
+    
+    def export_for_gepa(self) -> Dict:
+        """Export journal data in GEPA-compatible format"""
+        return {
+            'nodes': [
+                {
+                    'id': n.id,
+                    'step': n.step,
+                    'node_type': n.node_type,
+                    'plan': n.plan,
+                    'code': n.code[:500] if n.code else None,  # Truncate code
+                    'status': n.status,
+                    'raw_score': n.raw_score,
+                    'position_score': n.position_score,
+                    'is_buggy': n.is_buggy,
+                    'feedback': n.feedback,
+                }
+                for n in self.nodes
+            ],
+            'num_nodes': len(self.nodes),
+            'num_good_nodes': len(self.good_nodes),
+            'num_buggy_nodes': len(self.buggy_nodes),
+        }
+    
+    def to_trajectory(self) -> Dict:
+        """Convert journal to trajectory format for GEPA"""
+        best_node = self.get_best_node(only_good=False)
+        return {
+            'journal_export': self.export_for_gepa(),
+            'final_score': best_node.position_score if best_node and best_node.position_score else 0.0,
+            'failure_patterns': self.get_failure_analysis(),
+        }
+    
+    def get_failure_analysis(self) -> List[str]:
+        """Extract common failure patterns from buggy nodes"""
+        patterns = []
+        for node in self.buggy_nodes:
+            if node.feedback:
+                error_msg = str(node.feedback.get('error', 'Unknown error'))
+                patterns.append(error_msg[:200])  # Truncate long errors
+        return patterns

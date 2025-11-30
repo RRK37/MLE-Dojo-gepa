@@ -43,6 +43,7 @@ class Agent:
         higher_is_better: bool,
         data_dir: str, 
         output_dir: str,
+        custom_prompts: Dict[str, str] | None = None,
     ):
         super().__init__()
         self.total_cost = 0.0
@@ -54,6 +55,9 @@ class Agent:
         self.data_preview: str | None = None
         self.data_dir = data_dir
         self.output_dir = output_dir
+
+        # Custom prompts for GEPA integration (optional)
+        self.custom_prompts = custom_prompts or {}
 
         # history track
         self.cost_history = []  # Track cost history for each action
@@ -219,12 +223,18 @@ class Agent:
         return "","", completion_text  # type: ignore
 
     def _draft(self) -> Node:
-        prompt: Any = {
-            "Introduction": (
+        # Use custom introduction prompt if provided, otherwise use default
+        introduction = self.custom_prompts.get(
+            'introduction_draft',
+            (
                 "You are a Kaggle grandmaster attending a competition. "
                 "In order to win this competition, you need to come up with an excellent and creative plan "
                 "for a solution and then implement this solution in Python. We will now provide a description of the task."
-            ),
+            )
+        )
+        
+        prompt: Any = {
+            "Introduction": introduction,
             "Task description": self.task_desc,
             "Memory": self.journal.generate_summary(),
             "Instructions": {},
@@ -258,13 +268,19 @@ class Agent:
         return Node(plan=plan, code=code, instruction_prompt=compile_prompt_to_md(prompt), node_type="draft", assistant=assistant)
 
     def _improve(self, parent_node: Node) -> Node:
-        prompt: Any = {
-            "Introduction": (
+        # Use custom introduction prompt if provided, otherwise use default
+        introduction = self.custom_prompts.get(
+            'introduction_improve',
+            (
                 "You are a Kaggle grandmaster attending a competition. You are provided with a previously developed "
                 "solution below and should improve it in order to further increase the (test time) performance, i.e. the position score provided by the competition. "
                 "For this you should first outline a brief plan in natural language for how the solution can be improved and "
                 "then implement this improvement in Python based on the provided previous solution. "
-            ),
+            )
+        )
+        
+        prompt: Any = {
+            "Introduction": introduction,
             "Task description": self.task_desc,
             "Memory": self.journal.generate_summary(),
             "Instructions": {},
@@ -303,13 +319,19 @@ class Agent:
         )
 
     def _debug(self, parent_node: Node) -> Node:
-        prompt: Any = {
-            "Introduction": (
+        # Use custom introduction prompt if provided, otherwise use default
+        introduction = self.custom_prompts.get(
+            'introduction_debug',
+            (
                 "You are a Kaggle grandmaster attending a competition. "
                 "Your previous solution had a bug, so based on the information below, you should revise it in order to fix this bug. "
                 "Your response should be an implementation outline in natural language,"
                 " followed by a single markdown code block which implements the bugfix/solution."
-            ),
+            )
+        )
+        
+        prompt: Any = {
+            "Introduction": introduction,
             "Task description": self.task_desc,
             "Previous (buggy) implementation": wrap_code(parent_node.code),
             "Execution output": wrap_code(parent_node.feedback, lang=""),
