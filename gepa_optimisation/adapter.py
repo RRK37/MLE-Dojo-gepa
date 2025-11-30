@@ -41,7 +41,8 @@ class MLEDojoGEPAAdapter(GEPAAdapter):
                  max_steps: int = 10,
                  execution_timeout: int = 600,
                  score_mode: str = "position",
-                 enable_live_plot: bool = True):
+                 enable_live_plot: bool = True,
+                 insights_callback: Callable = None):
         """
         Args:
             competition_name: The Kaggle competition name (e.g., 'titanic').
@@ -52,6 +53,7 @@ class MLEDojoGEPAAdapter(GEPAAdapter):
             execution_timeout: Timeout for code execution in seconds.
             score_mode: Scoring mode ('position' or 'raw').
             enable_live_plot: Whether to enable live plotting of journal nodes.
+            insights_callback: Optional callback function to save insights after each evaluation.
         """
         self.competition_name = competition_name
         self.data_dir = data_dir
@@ -61,11 +63,15 @@ class MLEDojoGEPAAdapter(GEPAAdapter):
         self.execution_timeout = execution_timeout
         self.score_mode = score_mode
         self.enable_live_plot = enable_live_plot
+        self.insights_callback = insights_callback
         
         # Live plotting state
         self.fig = None
         self.ax = None
         self.plot_data = {'node_ids': [], 'scores': [], 'buggy': [], 'status': []}
+        
+        # Track optimization history for incremental insights
+        self.optimization_history = []
         
         if self.enable_live_plot:
             self._setup_live_plot()
@@ -326,6 +332,22 @@ REMEMBER: You MUST create submission.csv in EVERY iteration. Without it, your sc
         trajectories = full_traces if capture_traces else None
         
         print(f"[Adapter] Returning {len(rollout_outputs)} outputs with scores: {scores}")
+        
+        # Store evaluation in history for incremental insights
+        avg_score = sum(scores) / len(scores) if scores else 0.0
+        self.optimization_history.append({
+            'candidate': candidate,
+            'score': avg_score,
+            'scores': scores,
+            'timestamp': datetime.now().isoformat()
+        })
+        
+        # Call insights callback if provided (saves after each evaluation)
+        if self.insights_callback:
+            try:
+                self.insights_callback(self.optimization_history, candidate, avg_score)
+            except Exception as e:
+                print(f"[Adapter] Warning: Insights callback failed: {e}")
         
         return EvaluationBatch(
             outputs=rollout_outputs,

@@ -139,7 +139,29 @@ def main():
             system_prompt=system_prompt # <--- The GEPA optimization target
         )
 
-    # --- C. Initialize Adapter ---
+    # --- C. Setup Incremental Insights Saving ---
+    insights_dir = os.path.abspath("./gepa_insights")
+    os.makedirs(insights_dir, exist_ok=True)
+    extractor = GEPAInsightsExtractor(output_dir=insights_dir)
+    
+    def save_incremental_insights(history, candidate, score):
+        """Callback to save insights after each evaluation."""
+        # Create a minimal result object for extraction
+        class IncrementalResult:
+            def __init__(self, history_list, current_candidate, current_score):
+                self.best_candidate = current_candidate
+                self.best_score = current_score
+                self.history = history_list
+        
+        result = IncrementalResult(history, candidate, score)
+        print(f"\n[Incremental Save] Saving insights after evaluation (score: {score:.4f})...")
+        try:
+            extractor.extract_and_save(result, competition_name=competition_name)
+            print(f"[Incremental Save] ✓ Insights saved to {insights_dir}")
+        except Exception as e:
+            print(f"[Incremental Save] ✗ Failed to save insights: {e}")
+    
+    # --- D. Initialize Adapter ---
     adapter = MLEDojoGEPAAdapter(
         competition_name=competition_name,
         data_dir=data_dir,
@@ -147,14 +169,15 @@ def main():
         agent_factory=agent_factory,
         max_steps=3,  # Minimal steps for quick testing
         execution_timeout=600,
-        score_mode="position"
+        score_mode="position",
+        insights_callback=save_incremental_insights
     )
 
-    # --- D. Configure Initial Prompt ---
+    # --- E. Configure Initial Prompt ---
     initial_prompt = "You are a Kaggle Grandmaster. Focus on improvement in cross-validation metrics and engineering and robust validation."
     seed_candidate = {'system_prompt': initial_prompt}
 
-    # --- E. Run Optimization ---
+    # --- F. Run Optimization ---
     print(f"Starting GEPA Optimization on {competition_name}...")
     
     # GEPA requires a non-empty trainset for its reflection/sampling mechanisms
@@ -171,7 +194,7 @@ def main():
         display_progress_bar=True
     )
 
-    # --- F. Report Results ---
+    # --- G. Report Results ---
     print("\n" + "="*50)
     print("OPTIMIZATION COMPLETE")
     print(f"Best Score: {result.best_score}")
@@ -180,12 +203,9 @@ def main():
     print(result.best_candidate['system_prompt'])
     print("-" * 20)
     
-    # --- G. Extract and Save Detailed Insights ---
-    insights_dir = os.path.abspath("./gepa_insights")
-    extractor = GEPAInsightsExtractor(output_dir=insights_dir)
-    
+    # --- H. Extract and Save Final Insights ---
     print("\n" + "="*50)
-    print("EXTRACTING OPTIMIZATION INSIGHTS...")
+    print("EXTRACTING FINAL OPTIMIZATION INSIGHTS...")
     print("="*50)
     
     insights = extractor.extract_and_save(result, competition_name=competition_name)
