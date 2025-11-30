@@ -7,7 +7,7 @@ gepa:
   
   # LLM for reflection and prompt improvement
   # Using a stable model ID. 
-  reflection_lm: "anthropic/claude-3-5-sonnet-20240620"
+  reflection_lm: "anthropic/claude-3-5-sonnet-latest"
   
   # LLM used by AIDE agent (being optimized)
   task_lm: null
