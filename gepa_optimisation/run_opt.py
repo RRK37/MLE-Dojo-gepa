@@ -156,9 +156,13 @@ def main():
     # --- E. Run Optimization ---
     print(f"Starting GEPA Optimization on {competition_name}...")
     
+    # GEPA requires a non-empty trainset for its reflection/sampling mechanisms
+    # We provide dummy items since the adapter handles episodes internally
+    trainset = [{"episode": i} for i in range(3)]  # 3 episodes per evaluation
+    
     result = optimize(
         seed_candidate=seed_candidate,
-        trainset=[],  # MLE-Dojo adapter handles episodes internally
+        trainset=trainset,  # Provide dummy trainset items for GEPA's batch sampler
         adapter=adapter,
         reflection_lm="gpt-4o",  # The LLM analyzing the traces
         candidate_selection_strategy="current_best",  # Select best performing candidate

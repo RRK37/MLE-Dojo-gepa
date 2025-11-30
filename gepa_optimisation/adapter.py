@@ -79,8 +79,11 @@ REMEMBER: You MUST create submission.csv in EVERY iteration. Without it, your sc
         print(f"\n[Adapter] Evaluating with base prompt: {base_system_prompt[:80]}...")
         print(f"[Adapter] Batch size: {len(batch)}, Capture traces: {capture_traces}")
         
-        # 2. Run Episodes (1 episode per batch item, or default to 1 if batch is empty)
+        # 2. Run Episodes (1 episode per batch item)
+        # Each batch item represents one independent run of the agent with this prompt
         num_episodes = len(batch) if batch else 1
+        print(f"[Adapter] Running {num_episodes} episode(s) to evaluate this prompt")
+        
         total_score = 0
         full_traces = []
         rollout_outputs = []
