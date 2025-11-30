@@ -160,6 +160,17 @@ class MLEStarAgent:
     
     def parse_json_response(self, text: str) -> List[Dict]:
         """Parse JSON response from LLM."""
+        # Handle case where text might be a tuple (defensive programming)
+        if isinstance(text, tuple):
+            logger.warning(f"parse_json_response received tuple instead of string: {text}")
+            # Try to extract the first element if it's a tuple
+            text = text[0] if len(text) > 0 else ""
+        
+        # Ensure text is a string
+        if not isinstance(text, str):
+            logger.error(f"parse_json_response received non-string type: {type(text)}")
+            return []
+        
         # Try to extract JSON from markdown code blocks
         json_match = re.search(r'```(?:json)?\s*(\[.*?\]|\{.*?\})\s*```', text, re.DOTALL)
         if json_match:
@@ -254,7 +265,14 @@ class MLEStarAgent:
         search_result = self.search_web(query)  # Now synchronous
         
         prompt = prompts.prompt_1_model_retrieval(self.task_desc, M)
-        response, _ = self.query_llm(prompt)
+        result = self.query_llm(prompt)
+        
+        # Ensure we properly unpack the tuple
+        if isinstance(result, tuple):
+            response, _ = result
+        else:
+            logger.error(f"query_llm returned unexpected type: {type(result)}")
+            response = str(result) if result else ""
         
         models = self.parse_json_response(response)
         if not models:
