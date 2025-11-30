@@ -41,15 +41,17 @@ agent:
   # LLM settings for coding
   code:
     model_mode: claude
-    # UPDATED: Use the latest alias
     model_name: claude-3-5-sonnet-latest
     port: 8314  # Port for local model
-    # UPDATED: Renamed to standard max_tokens (LiteLLM handles mapping, but this is safer)
-    max_tokens: 8192
-    # REMOVED: max_prompt_tokens is not supported by Anthropic API and causes 400 Bad Request
+    
+    # REVERTED: Schema requires 'max_completion_tokens', not 'max_tokens'
+    max_completion_tokens: 8192
+    
+    # REMOVED: max_prompt_tokens causes 400 Bad Request with Anthropic
     # max_prompt_tokens: 30000 
+    
     api_idx: -1
-    api_key: null # Ensure ANTHROPIC_API_KEY is set in your .env
+    api_key: null # use environment variable ANTHROPIC_API_KEY
     temperature: 0.0
     top_p: 1.0
 
