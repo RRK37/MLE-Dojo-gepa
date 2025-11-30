@@ -5,7 +5,7 @@ import numpy as np
 from pathlib import Path
 
 # Read the CSV data
-df = pd.read_csv('journal_nodes.csv')
+df = pd.read_csv('output.csv')
 
 # Fix episode counting - assign candidate_id based on timestamp groups
 df['timestamp'] = pd.to_datetime(df['timestamp'], format='%Y%m%d_%H%M%S')

@@ -10,6 +10,7 @@ sys.path.append(project_root)
 # 2. Imports
 from gepa import optimize
 from gepa_optimisation.adapter import MLEDojoGEPAAdapter
+from gepa_optimisation.extract_insights import GEPAInsightsExtractor
 from omegaconf import OmegaConf
 
 # Import your agent and its dependencies
@@ -179,9 +180,26 @@ def main():
     print(result.best_candidate['system_prompt'])
     print("-" * 20)
     
-    # Optional: Save the best prompt to a file
+    # --- G. Extract and Save Detailed Insights ---
+    insights_dir = os.path.abspath("./gepa_insights")
+    extractor = GEPAInsightsExtractor(output_dir=insights_dir)
+    
+    print("\n" + "="*50)
+    print("EXTRACTING OPTIMIZATION INSIGHTS...")
+    print("="*50)
+    
+    insights = extractor.extract_and_save(result, competition_name=competition_name)
+    
+    print("\n" + "="*50)
+    print(f"✓ Insights saved to: {insights_dir}")
+    print("  - JSON format: gepa_insights_*.json")
+    print("  - Human-readable: gepa_report_*.txt")
+    print("="*50)
+    
+    # Optional: Save the best prompt to a quick-access file
     with open("best_prompt.txt", "w") as f:
         f.write(result.best_candidate['system_prompt'])
+    print(f"✓ Best prompt saved to: best_prompt.txt")
 
 if __name__ == "__main__":
     main()
