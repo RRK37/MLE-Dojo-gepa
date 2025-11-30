@@ -21,6 +21,7 @@ python_Levenshtein==0.27.1
 PyYAML==6.0.2
 Requests==2.32.3
 rich==14.0.0
+websockets==12.0
 scikit_learn==1.6.1
 scipy==1.15.2
 shutup==0.2.0
