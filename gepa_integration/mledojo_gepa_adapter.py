@@ -27,7 +27,7 @@ from mledojo.utils import load_config, create_config_from_args, get_metric
 logger = logging.getLogger("gepa_mledojo")
 
 # Verification print to confirm module reload
-print("DEBUG: Loaded updated MLEDojoGEPAAdapter module v2", file=sys.stderr)
+print("DEBUG: Loaded MLEDojoGEPAAdapter module with PATH FIX v3", file=sys.stderr)
 
 @dataclass
 class CompetitionConfig:
@@ -121,6 +121,7 @@ class MLEDojoGEPAAdapter:
             except Exception as e:
                 err_msg = f"Failed to evaluate {comp_config.name}: {e}"
                 print(f"ERROR: {err_msg}", file=sys.stderr)
+                # Print traceback to stderr to see exactly where it fails
                 traceback.print_exc()
                 
                 outputs.append({'error': str(e)})
@@ -193,6 +194,11 @@ class MLEDojoGEPAAdapter:
         
         # Setup AIDE agent with custom prompts
         print(f"DEBUG: Setting up AIDE agent with desc_file: {config.get('desc_file')}", file=sys.stderr)
+        
+        # Verify file exists one last time before passing to agent
+        if not os.path.exists(config.get('desc_file', '')):
+            print(f"CRITICAL ERROR: File still does not exist: {config.get('desc_file')}", file=sys.stderr)
+            
         agent, journal, cfg = setup_aide_agent(
             config=config,
             custom_prompts=custom_prompts
@@ -245,13 +251,9 @@ class MLEDojoGEPAAdapter:
         config['competition']['name'] = comp_config.name
         config['competition']['data_dir'] = comp_root_dir
         
-        # SEARCH LOGIC
-        # We try strict structure first: .../data/public/description.txt
-        # Then fallback: .../public/description.txt
-        # Then fallback: .../description.txt
-        
+        # SEARCH LOGIC - Strict order based on check_paths output
         path_options = [
-            os.path.join(comp_root_dir, "data", "public", "description.txt"),
+            os.path.join(comp_root_dir, "data", "public", "description.txt"), # Correct path
             os.path.join(comp_root_dir, "public", "description.txt"),
             os.path.join(comp_root_dir, "description.txt"),
             # Also try without the intermediate 'data' folder just in case
@@ -270,7 +272,7 @@ class MLEDojoGEPAAdapter:
         else:
             print(f"ERROR: Description file NOT FOUND. Checked: {path_options}", file=sys.stderr)
             
-            # FORCE FALLBACK: Create dummy file
+            # FORCE FALLBACK: Create dummy file to prevent crashing
             dummy_path = os.path.join(comp_config.output_dir, "description.txt")
             os.makedirs(os.path.dirname(dummy_path), exist_ok=True)
             with open(dummy_path, 'w') as f:
