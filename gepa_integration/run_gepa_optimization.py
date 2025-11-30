@@ -191,18 +191,6 @@ def main():
     
     try:
         # Run GEPA optimization
-        # Note: This is a simplified version. Full GEPA integration would require
-        # implementing the full GEPAAdapter protocol methods as async or with proper
-        # evaluation functions
-        
-        logger.warning("GEPA optimization loop not fully implemented yet.")
-        logger.warning("This is a template. You need to:")
-        logger.warning("1. Call gepa.optimize() with proper parameters")
-        logger.warning("2. Implement evaluation function that calls adapter.evaluate()")
-        logger.warning("3. Handle iteration logging with gepa_logger")
-        logger.warning("4. Save best candidate prompts")
-        
-        # Placeholder for gepa.optimize call:
         result = gepa.optimize(
              seed_candidate=seed_candidate,
              trainset=trainset,
@@ -213,33 +201,11 @@ def main():
              adapter=adapter
         )
         
-        # For now, just demonstrate the adapter works
-        #logger.info("Testing adapter with seed candidate...")
-        #test_batch = trainset[:1]  # Test with one competition
-        
-        #eval_result = adapter.evaluate(
-        #    batch=test_batch,
-        #    candidate=seed_candidate,
-        #    capture_traces=True
-        #)
-        
-        #logger.info(f"Test evaluation completed:")
-        #logger.info(f"  - Outputs: {len(eval_result['outputs'])}")
-        #logger.info(f"  - Scores: {eval_result['scores']}")
-        #logger.info(f"  - Trajectories: {len(eval_result['trajectories']) if eval_result['trajectories'] else 0}")
-        
-        # Save test results
-        import json
-        with open(output_dir / "test_evaluation_result.json", 'w') as f:
-            # Don't serialize trajectories (too large)
-            result_summary = {
-                'scores': eval_result['scores'],
-                'outputs': eval_result['outputs']
-            }
-            json.dump(result_summary, f, indent=2)
-        
-        logger.info(f"Test results saved to {output_dir / 'test_evaluation_result.json'}")
-        
+        # Save best prompts found
+        if hasattr(result, 'best_candidate'):
+            serialize_prompts(result.best_candidate, output_dir / "best_prompts.json")
+            logger.info(f"Best prompts saved to {output_dir / 'best_prompts.json'}")
+
         # Generate plots and reports
         if gepa_config['output'].get('generate_plots', True):
             gepa_logger.plot_optimization_progress()

@@ -241,13 +241,19 @@ class MLEDojoGEPAAdapter:
         # Structure: data/prepared/<comp_name>/data/public/description.txt
         desc_path = os.path.join(comp_root_dir, "data", "public", "description.txt")
         
-        # Verify it exists before passing it to the agent
+        # Check if the file exists and log info
         if os.path.exists(desc_path):
             config['desc_file'] = desc_path
         else:
-            # If we can't find it, log clearly where we looked
             logger.error(f"FILE MISSING: Expected description at {desc_path}")
-            config['desc_file'] = desc_path 
+            # Try fallback: maybe without 'data'?
+            fallback_path = os.path.join(comp_root_dir, "public", "description.txt")
+            if os.path.exists(fallback_path):
+                logger.info(f"Found description at fallback location: {fallback_path}")
+                config['desc_file'] = fallback_path
+            else:
+                # Keep original path so error is clear
+                config['desc_file'] = desc_path 
             
         config['env']['max_steps'] = comp_config.max_steps
         config['env']['execution_timeout'] = comp_config.execution_timeout
