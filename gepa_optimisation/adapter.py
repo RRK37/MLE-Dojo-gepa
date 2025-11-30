@@ -183,6 +183,21 @@ REMEMBER: You MUST create submission.csv in EVERY iteration. Without it, your sc
                 print(f"[Adapter Debug] Attempting CV extraction - execution_succeeded={execution_succeeded}, reward={reward}")
                 print(f"[Adapter Debug] Obs type: {type(obs)}, Obs keys: {list(obs.keys()) if isinstance(obs, dict) else 'N/A'}")
                 
+                # Print feedback structure for debugging
+                if isinstance(obs, dict) and "feedback" in obs:
+                    feedback = obs["feedback"]
+                    print(f"[Adapter Debug] Feedback type: {type(feedback)}")
+                    if isinstance(feedback, dict):
+                        print(f"[Adapter Debug] Feedback keys: {list(feedback.keys())[:5]}")  # Limit to first 5
+                        # Check for execution key
+                        if "execution" in feedback:
+                            print(f"[Adapter Debug] Found 'execution' in feedback")
+                            exec_data = feedback["execution"]
+                            if isinstance(exec_data, dict):
+                                print(f"[Adapter Debug] Execution keys: {list(exec_data.keys())}")
+                    elif isinstance(feedback, str):
+                        print(f"[Adapter Debug] Feedback is string: {feedback[:100]}")
+                
                 cv_score = self._extract_cv_score_from_output(obs, execution_succeeded)
                 
                 # Use CV score as reward if found and no submission reward exists
@@ -289,12 +304,21 @@ REMEMBER: You MUST create submission.csv in EVERY iteration. Without it, your sc
             
         import re
         
-        # The observation structure from env.step() contains feedback with execution results
-        # We need to check multiple possible locations for the stdout
+        # The observation now includes raw_result which contains the unprocessed execution output
         stdout_text = None
         
-        # Method 1: Check if feedback is directly in obs (most common case)
-        if "feedback" in obs and isinstance(obs["feedback"], dict):
+        # Method 1: Check raw_result (NEW - most direct path to stdout)
+        if "raw_result" in obs and isinstance(obs["raw_result"], dict):
+            raw_result = obs["raw_result"]
+            if "execution" in raw_result and isinstance(raw_result["execution"], dict):
+                exec_result = raw_result["execution"]
+                # Check both 'output' (from utils.py) and 'stdout' (from sandbox.py)
+                stdout_text = exec_result.get("output") or exec_result.get("stdout")
+                if stdout_text:
+                    print(f"[Adapter] Found stdout in raw_result->execution->output/stdout")
+        
+        # Method 2: Check if feedback is directly in obs (fallback for backwards compatibility)
+        if not stdout_text and "feedback" in obs and isinstance(obs["feedback"], dict):
             feedback = obs["feedback"]
             
             # Check for nested feedback structure with modes
@@ -320,7 +344,7 @@ REMEMBER: You MUST create submission.csv in EVERY iteration. Without it, your sc
                 if isinstance(exec_result, dict):
                     stdout_text = exec_result.get("stdout") or exec_result.get("output")
         
-        # Method 2: Check if obs itself has execution key (alternative structure)
+        # Method 3: Check if obs itself has execution key (alternative structure)
         if not stdout_text and "execution" in obs:
             exec_result = obs["execution"]
             if isinstance(exec_result, dict):

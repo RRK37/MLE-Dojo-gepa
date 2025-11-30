@@ -310,6 +310,7 @@ class KaggleEnvironment(gym.Env):
             "action_status": result.get("status"),
             "execution_status": execution_status,  # Status of code execution specifically
             "feedback": feedback,
+            "raw_result": result,  # Include raw result for CV score extraction from stdout
             "current_raw_score": self.current_raw_score,
             "current_position_score": self.current_position_score,
             "best_raw_score": self.best_raw_score,
