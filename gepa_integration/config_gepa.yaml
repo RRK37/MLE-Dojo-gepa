@@ -1,0 +1,54 @@
+# GEPA Optimization Configuration for MLE-Dojo AIDE Agent
+
+# GEPA Settings
+gepa:
+  # Maximum number of optimization iterations
+  max_iterations: 10
+  
+  # LLM for reflection and prompt improvement
+  reflection_lm: "openai/gpt-4o"
+  
+  # LLM used by AIDE agent (being optimized)
+  task_lm: "openai/gpt-4o-mini"
+  
+  # Training competitions (used for optimization)
+  train_competitions:
+    - "titanic"
+    - "spaceship-titanic"
+  
+  # Validation competitions (used for evaluation)
+  val_competitions:
+    - "house-prices-advanced-regression-techniques"
+  
+  # Number of competitions to sample per batch
+  train_batch_size: 2
+  val_batch_size: 1
+
+# AIDE Agent Settings (for GEPA optimization runs)
+aide:
+  # Reduced steps per run for faster iterations
+  max_steps: 5
+  
+  # Execution timeout per run (seconds)
+  execution_timeout: 3600
+  
+  # Other settings inherit from main config.yaml
+
+# Output Settings
+output:
+  # Base directory for GEPA outputs
+  base_dir: "./gepa_outputs"
+  
+  # Save optimized prompts
+  save_prompts: true
+  
+  # Generate visualization plots
+  generate_plots: true
+  
+  # Log level
+  log_level: "INFO"
+
+# Data Directories
+data:
+  # Base directory for competition data
+  base_dir: "./data/prepared"
