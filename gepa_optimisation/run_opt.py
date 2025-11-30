@@ -9,8 +9,7 @@ sys.path.append(project_root)
 
 # 2. Imports
 from gepa import optimize
-from gepa import OptimizerConfig
-from gepa_optimization.adapter import MLEDojoGEPAAdapter
+from gepa_optimisation.adapter import MLEDojoGEPAAdapter
 
 # Import your agent and its dependencies
 from existing_agent_code.agent import Agent
@@ -59,24 +58,21 @@ def main():
         max_steps=8 # Limit steps to save tokens during optimization
     )
 
-    # --- D. Configure GEPA ---
-    gepa_config = OptimizerConfig(
-        num_generations=5,          # How many rounds of evolution
-        candidates_per_gen=4,       # How many variations per round
-        reflection_model="gpt-4o",  # The LLM analyzing the traces
-        evolution_strategy="pareto",
-        temperature=0.7
-    )
-
+    # --- D. Configure Initial Prompt ---
     initial_prompt = "You are a Kaggle Grandmaster. Focus on feature engineering and robust validation."
+    seed_candidate = {'system_prompt': initial_prompt}
 
     # --- E. Run Optimization ---
     print(f"Starting GEPA Optimization on {task_name}...")
     
     result = optimize(
+        seed_candidate=seed_candidate,
+        trainset=[],  # MLE-Dojo adapter handles episodes internally
         adapter=adapter,
-        initial_text_components={'system_prompt': initial_prompt},
-        config=gepa_config
+        reflection_lm="gpt-4o",  # The LLM analyzing the traces
+        candidate_selection_strategy="pareto",
+        max_metric_calls=20,  # Limit total evaluations (5 generations * 4 candidates = 20)
+        display_progress_bar=True
     )
 
     # --- F. Report Results ---
