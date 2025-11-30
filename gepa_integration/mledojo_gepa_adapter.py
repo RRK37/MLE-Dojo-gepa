@@ -117,7 +117,11 @@ class MLEDojoGEPAAdapter:
                 logger.info(f"{run_id} | {comp_config.name} | Score: {result['score']:.4f}")
                 
             except Exception as e:
+                # Log traceback for debugging
+                import traceback
                 logger.error(f"Failed to evaluate {comp_config.name}: {e}")
+                logger.error(traceback.format_exc())
+                
                 # On failure, assign score of 0
                 outputs.append({'error': str(e)})
                 scores.append(0.0)
@@ -131,7 +135,7 @@ class MLEDojoGEPAAdapter:
                         best_score=0.0,
                         num_good_nodes=0,
                         num_buggy_nodes=0,
-                        failure_patterns=[str(e)]
+                        failure_patterns=[f"System Error: {str(e)}"]
                     ))
         
         return GEPAEvaluationResult(
@@ -229,20 +233,43 @@ class MLEDojoGEPAAdapter:
         """Prepare configuration dict for AIDE agent"""
         config = self.base_config.copy()
         
-        # 1. Define the specific competition root directory
-        # This assumes your data is at: ./data/prepared/<competition_name>
-        comp_root_dir = os.path.join(comp_config.data_dir, comp_config.name)
+        # Resolve paths to absolute to avoid ambiguity
+        cwd = os.getcwd()
+        abs_data_dir = os.path.abspath(comp_config.data_dir)
+        comp_root_dir = os.path.join(abs_data_dir, comp_config.name)
         
-        # 2. Update the config to point to this specific folder
+        logger.info(f"Preparing config for {comp_config.name}")
+        logger.info(f"CWD: {cwd}")
+        logger.info(f"Comp root dir: {comp_root_dir}")
+        
+        # Debug: Check if directory exists and list content
+        if os.path.exists(comp_root_dir):
+            try:
+                contents = os.listdir(comp_root_dir)
+                logger.info(f"Contents of {comp_root_dir}: {contents}")
+                
+                # Check inside 'data' if it exists
+                data_sub = os.path.join(comp_root_dir, "data")
+                if os.path.exists(data_sub):
+                    logger.info(f"Contents of {data_sub}: {os.listdir(data_sub)}")
+                    
+                    # Check inside 'public' if it exists
+                    public_sub = os.path.join(data_sub, "public")
+                    if os.path.exists(public_sub):
+                        logger.info(f"Contents of {public_sub}: {os.listdir(public_sub)}")
+            except Exception as e:
+                logger.warning(f"Could not list directory contents: {e}")
+        else:
+            logger.error(f"Competition root directory NOT FOUND: {comp_root_dir}")
+
         config['competition']['name'] = comp_config.name
         config['competition']['data_dir'] = comp_root_dir
         
         # 3. Robustly find the description file
-        # We search in order of likelihood
         possible_paths = [
-            os.path.join(comp_root_dir, "data", "public", "description.txt"), # Standard MLE-Dojo
-            os.path.join(comp_root_dir, "public", "description.txt"),       # Flat structure
-            os.path.join(comp_root_dir, "description.txt"),                 # Root
+            os.path.join(comp_root_dir, "data", "public", "description.txt"),
+            os.path.join(comp_root_dir, "public", "description.txt"),
+            os.path.join(comp_root_dir, "description.txt"),
         ]
         
         desc_path = None
@@ -255,9 +282,20 @@ class MLEDojoGEPAAdapter:
         if desc_path:
             config['desc_file'] = desc_path
         else:
-            # Log failure but set to the primary expected path so the error message is clear
-            logger.error(f"FILE MISSING: Could not find description.txt. Searched: {possible_paths}")
-            config['desc_file'] = possible_paths[0]
+            logger.error(f"FILE MISSING: Could not find description.txt in {comp_root_dir}")
+            
+            # FALLBACK: Create a dummy description file so the agent doesn't crash on startup.
+            # This allows the agent to start, inspect the file system, and potentially recover.
+            dummy_desc_path = os.path.join(config['output_dir'], f"{comp_config.name}_description.txt")
+            os.makedirs(os.path.dirname(dummy_desc_path), exist_ok=True)
+            
+            with open(dummy_desc_path, 'w') as f:
+                f.write(f"Task: {comp_config.name}\n")
+                f.write("Please inspect the data files in the competition directory to understand the task.\n")
+                f.write(f"The data should be located at: {comp_root_dir}\n")
+            
+            logger.warning(f"Using synthetic description file: {dummy_desc_path}")
+            config['desc_file'] = dummy_desc_path
             
         config['env']['max_steps'] = comp_config.max_steps
         config['env']['execution_timeout'] = comp_config.execution_timeout
