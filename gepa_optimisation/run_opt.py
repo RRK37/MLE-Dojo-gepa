@@ -161,7 +161,7 @@ def main():
         trainset=[],  # MLE-Dojo adapter handles episodes internally
         adapter=adapter,
         reflection_lm="gpt-4o",  # The LLM analyzing the traces
-        candidate_selection_strategy="pareto",
+        candidate_selection_strategy="random",  # Use 'random' instead of 'pareto' for single-episode evals
         max_metric_calls=20,  # Limit total evaluations (5 generations * 4 candidates = 20)
         display_progress_bar=True
     )
