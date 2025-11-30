@@ -202,8 +202,7 @@ Focus on writing clean, executable code that improves the score."""
         reflection_lm="gpt-4o",  # The LLM analyzing the traces
         candidate_selection_strategy="current_best",  # Select best performing candidate
         max_metric_calls=6,  # Increased to 6 for more mutation opportunities (1 seed + 5 mutations)
-        display_progress_bar=True,
-        temperature=1.0  # Higher temperature for more creative/aggressive mutations
+        display_progress_bar=True
     )
 
     # --- G. Report Results ---
