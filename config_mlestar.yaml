@@ -1,0 +1,31 @@
+# Configuration file for running MLE-STAR agent on Kaggle competitions
+
+# Output directory for agent results and logs
+output_dir: "output/"
+
+# Competition settings, will be overridden by args of run.py
+competition:
+  name: "dog-breed-identification"
+  data_dir: "data/prepared"               
+
+# Environment settings
+env:
+  render_mode: "human"
+  gpu_device: 0
+  gpu_memory_limit: 32
+  execution_timeout: 14400  # 4 hours for MLE-STAR workflow
+  score_mode: "position"
+  max_steps: 30  # Increased for MLE-STAR workflow
+
+# Agent Type
+agent_type: "mlestar"
+
+# MLE-STAR specific configuration
+mlestar:
+  # Number of web search iterations (default: 3)
+  search_iterations: 3
+  # Number of refinement cycles (default: 5)
+  refinement_iterations: 5
+  # Perplexity API key (optional, can also use PERPLEXITY_API_KEY env var)
+  perplexity_api_key: null
+

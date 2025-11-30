@@ -31,6 +31,7 @@ from mledojo.agent.aide.utils.config import save_run
 from mledojo.agent.mleagent.buildup import setup_mle_agent
 from mledojo.agent.openaiagent.buildup import setup_openai_agent
 from mledojo.agent.aide.buildup import setup_aide_agent
+from mledojo.agent.mlestar.buildup import setup_mlestar_agent
 from mledojo.agent.dummy.buildup import setup_dummy_agent
 
 # Environment imports
@@ -521,6 +522,11 @@ def main() -> None:
             'run': run_aide_agent,
             'name': "AIDE Agent"
         },
+        'mlestar': {
+            'setup': setup_mlestar_agent,
+            'run': run_aide_agent,  # Uses same run function as AIDE
+            'name': "MLE-STAR Agent"
+        },
         'dummy': {
             'setup': setup_dummy_agent,
             'run': run_dummy_agent,
@@ -535,8 +541,8 @@ def main() -> None:
     handler = agent_handlers[agent_type]
     logger.info(f"Selected agent type: {handler['name']} ({agent_type})")
     
-    # Special case for AIDE agent
-    if agent_type == 'aide':
+    # Special case for AIDE and MLE-STAR agents (they use the same setup pattern)
+    if agent_type in ['aide', 'mlestar']:
         agent, journal, cfg = handler['setup'](config)
         config['output_dir'] = cfg.workspace_dir
         env = setup_environment(config)
