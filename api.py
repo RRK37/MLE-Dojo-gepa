@@ -313,6 +313,8 @@ class DataStreamer:
                     data = json.loads(message)
                     command = data.get("command")
                     
+                    logger.info(f"Received command: {command}")
+                    
                     if command == "prepare":
                         competition_name = data.get("competition_name")
                         if not competition_name:
@@ -391,9 +393,10 @@ class DataStreamer:
                             })
                     
                     else:
+                        logger.warning(f"Unknown command received: {command}, data: {data}")
                         await self.send_to_client(websocket, {
                             "type": "error",
-                            "message": f"Unknown command: {command}"
+                            "message": f"Unknown command: {command}. Available commands: prepare, run_competition, run_main, read_files, stop"
                         })
                 
                 except json.JSONDecodeError:
