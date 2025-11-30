@@ -126,8 +126,14 @@ class MLEDojoGEPAAdapter(GEPAAdapter):
                 episode_trace.append(f"Execution Output:\n{feedback_str[:500]}...")
                 
                 # Determine success based on execution status in observation
-                status_str = obs.get("status", "FAILED")
-                is_success = status_str == "SUCCESS" or status_str == "success"
+                # MLE-Dojo uses "execution_status" key, and "success" (lowercase) as the value
+                status_str = obs.get("execution_status", obs.get("status", ""))
+                is_success = (status_str.lower() == "success" or 
+                             status_str == "SUCCESS" or 
+                             (isinstance(obs, dict) and obs.get("execution_status") == "success") or
+                             reward > 0.0)  # If we got a positive reward, consider it success
+                
+                print(f"[Adapter] Step {steps}: status='{status_str}', reward={reward}, is_success={is_success}")
                 
                 # Convert Gym output to the dictionary format Agent.parse_exec_result expects
                 return {
