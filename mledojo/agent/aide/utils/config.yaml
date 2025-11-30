@@ -52,7 +52,7 @@ agent:
 
   code:
       model_mode: claude
-      model_name: claude-sonnet-4-20250514  # or claude-sonnet-3-5-20241022
+      model_name: claude-opus-4-5  # or claude-sonnet-3-5-20241022
       port: 8314  # Not used for Claude, but keep for compatibility
       max_completion_tokens: 8192
       max_prompt_tokens: 30000 
