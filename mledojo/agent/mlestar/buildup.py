@@ -76,7 +76,7 @@ def setup_mlestar_agent(
     mlestar_cfg = MLEStarConfig(
         search_iterations=mlestar_config_dict.get('search_iterations', 3),
         refinement_iterations=mlestar_config_dict.get('refinement_iterations', 5),
-        perplexity_model=mlestar_config_dict.get('perplexity_model', 'llama-3.1-sonar-large-128k-online'),
+        perplexity_model=mlestar_config_dict.get('perplexity_model', 'sonar'),  # Valid: sonar, sonar-pro, sonar-reasoning
         enable_web_search=mlestar_config_dict.get('enable_web_search', True),
         enable_ablation=mlestar_config_dict.get('enable_ablation', True),
         enable_refinement=mlestar_config_dict.get('enable_refinement', True),

@@ -45,7 +45,7 @@ class MLEStarConfig:
     """Configuration for MLE-STAR specific settings"""
     search_iterations: int = 3
     refinement_iterations: int = 5
-    perplexity_model: str = "llama-3.1-sonar-large-128k-online"
+    perplexity_model: str = "sonar"  # Valid Perplexity model: sonar, sonar-pro, or sonar-reasoning
     enable_web_search: bool = True
     enable_ablation: bool = True
     enable_refinement: bool = True
@@ -162,11 +162,24 @@ class MLESTARAgent(AIDEAgent):
             else:
                 logger.warning("Perplexity API key not found. Web search disabled.")
     
-    def query_llm(self, system_message: str, user_message: Optional[str] = None) -> Tuple[str, float]:
+    def query_llm(self, system_message: str | dict | None, user_message: Optional[str] = None) -> Tuple[str, float]:
         """Query the LLM model."""
-        system_message = compile_prompt_to_md(system_message) if system_message else None
+        # Compile prompt to markdown if it's a dict, otherwise use as-is (might already be compiled)
+        if isinstance(system_message, dict):
+            system_message = compile_prompt_to_md(system_message)
+        elif system_message:
+            # If it's already a string, ensure it's properly formatted
+            system_message = system_message.strip() + "\n" if system_message.strip() else None
+        else:
+            system_message = None
+            
         user_message = compile_prompt_to_md(user_message) if user_message else None
         messages = opt_messages_to_list(system_message, user_message)
+        
+        # Ensure we have at least one message
+        if not messages:
+            logger.error("No messages to send to LLM - both system_message and user_message are empty")
+            return "", 0.0
         
         # chat_completion returns (response_text, cost) tuple
         result = self.model_client.chat_completion(messages, self.model_settings)
@@ -241,6 +254,7 @@ class MLESTARAgent(AIDEAgent):
         response_text = ""
         for attempt in range(retries):
             try:
+                # Pass prompt directly to query_llm - it will handle dict compilation
                 result = self.query_llm(
                     system_message=prompt,
                     user_message=None,
