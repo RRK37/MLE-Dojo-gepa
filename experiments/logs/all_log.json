@@ -1,0 +1,18 @@
+{
+  "timestamp": "2023-10-27T10:00:00.000000",
+  "gpu_status": {
+    "0": "1/2 tasks running"
+  },
+  "running_tasks": [
+    {
+      "task_id": 0,
+      "gpu_index": 0,
+      "competition_name": "spaceship-titanic",
+      "container_id": "abcdef123456",
+      "start_time": "2023-10-27T09:00:00.000000",
+      "runtime": "1:00:00"
+    }
+  ],
+  "completed_tasks": [],
+  "tasks_in_queue": 0
+}
