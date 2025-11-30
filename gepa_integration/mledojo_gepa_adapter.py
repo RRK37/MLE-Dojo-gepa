@@ -237,23 +237,27 @@ class MLEDojoGEPAAdapter:
         config['competition']['name'] = comp_config.name
         config['competition']['data_dir'] = comp_root_dir
         
-        # 3. Explicitly set the description file path WITH 'data' FOLDER
-        # Structure: data/prepared/<comp_name>/data/public/description.txt
-        desc_path = os.path.join(comp_root_dir, "data", "public", "description.txt")
+        # 3. Robustly find the description file
+        # We search in order of likelihood
+        possible_paths = [
+            os.path.join(comp_root_dir, "data", "public", "description.txt"), # Standard MLE-Dojo
+            os.path.join(comp_root_dir, "public", "description.txt"),       # Flat structure
+            os.path.join(comp_root_dir, "description.txt"),                 # Root
+        ]
         
-        # Check if the file exists and log info
-        if os.path.exists(desc_path):
+        desc_path = None
+        for path in possible_paths:
+            if os.path.exists(path):
+                desc_path = path
+                logger.info(f"Found description file at: {path}")
+                break
+                
+        if desc_path:
             config['desc_file'] = desc_path
         else:
-            logger.error(f"FILE MISSING: Expected description at {desc_path}")
-            # Try fallback: maybe without 'data'?
-            fallback_path = os.path.join(comp_root_dir, "public", "description.txt")
-            if os.path.exists(fallback_path):
-                logger.info(f"Found description at fallback location: {fallback_path}")
-                config['desc_file'] = fallback_path
-            else:
-                # Keep original path so error is clear
-                config['desc_file'] = desc_path 
+            # Log failure but set to the primary expected path so the error message is clear
+            logger.error(f"FILE MISSING: Could not find description.txt. Searched: {possible_paths}")
+            config['desc_file'] = possible_paths[0]
             
         config['env']['max_steps'] = comp_config.max_steps
         config['env']['execution_timeout'] = comp_config.execution_timeout

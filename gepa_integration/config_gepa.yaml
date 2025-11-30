@@ -6,7 +6,9 @@ gepa:
   max_iterations: 10
   
   # LLM for reflection and prompt improvement
-  reflection_lm: "anthropic/claude-sonnet-4-20250514"
+  # Using a stable model ID. 
+  # Alternatives: "openai/gpt-4o", "anthropic/claude-3-5-sonnet-20240620"
+  reflection_lm: "openai/gpt-4o"
   
   # LLM used by AIDE agent (being optimized)
   task_lm: null
