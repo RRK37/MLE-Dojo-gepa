@@ -38,6 +38,8 @@ class GEPAInsightsExtractor:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         
         # Extract all insights
+        mutation_reasoning = self._extract_mutation_reasoning(result)
+        
         insights = {
             "metadata": {
                 "competition": competition_name,
@@ -47,10 +49,20 @@ class GEPAInsightsExtractor:
             "best_prompt": self._extract_best_prompt(result),
             "best_score": self._extract_best_score(result),
             "reflection_insights": self._extract_reflection_insights(result),
-            "mutation_reasoning": self._extract_mutation_reasoning(result),
+            "mutation_reasoning": mutation_reasoning,
             "performance_history": self._extract_performance_history(result),
             "optimization_summary": self._create_summary(result)
         }
+        
+        # Add explanation if no mutations occurred
+        no_mutations = all(m.get('change_summary') == 'No change' or 'note' in m 
+                          for m in mutation_reasoning)
+        if no_mutations and len(mutation_reasoning) > 0:
+            insights["mutation_explanation"] = (
+                "No prompt mutations were observed. This typically means GEPA's reflection LLM "
+                "decided the initial prompt was already optimal, or only 1 optimization iteration "
+                "ran (with max_metric_calls=2, only 1 mutation step occurs after the seed evaluation)."
+            )
         
         # Save to JSON
         json_path = self.output_dir / f"gepa_insights_{timestamp}.json"
@@ -167,9 +179,15 @@ class GEPAInsightsExtractor:
         
         try:
             if hasattr(result, 'history') and result.history:
+                print(f"[Insights] Extracting mutations from {len(result.history)} history entries")
+                
                 for idx in range(1, len(result.history)):
                     prev_entry = result.history[idx - 1]
                     curr_entry = result.history[idx]
+                    
+                    # Debug: print what's in the entry
+                    if isinstance(curr_entry, dict):
+                        print(f"[Insights] History entry {idx} keys: {list(curr_entry.keys())}")
                     
                     mutation_data = {
                         'iteration': idx,
@@ -187,20 +205,25 @@ class GEPAInsightsExtractor:
                         mutation_data['change_summary'] = self._summarize_prompt_change(
                             prev_prompt, curr_prompt
                         )
+                        
+                        if prev_prompt == curr_prompt:
+                            mutation_data['reasoning'] = 'GEPA did not mutate the prompt (kept original)'
                     
-                    # Look for mutation reasoning
+                    # Look for mutation reasoning in various fields
                     if isinstance(curr_entry, dict):
-                        if 'mutation_reason' in curr_entry:
-                            mutation_data['reasoning'] = curr_entry['mutation_reason']
-                        elif 'explanation' in curr_entry:
-                            mutation_data['reasoning'] = curr_entry['explanation']
+                        # Check all possible keys for mutation info
+                        for key in ['mutation_reason', 'explanation', 'reasoning', 'reflection', 'analysis']:
+                            if key in curr_entry:
+                                mutation_data['reasoning'] = curr_entry[key]
+                                print(f"[Insights] Found mutation reasoning in '{key}' field")
+                                break
                     
                     mutations.append(mutation_data)
             
             if not mutations:
                 mutations.append({
                     'note': 'No mutation data found in history',
-                    'suggestion': 'GEPA may not store mutation reasoning, or format differs'
+                    'explanation': 'This can happen when: (1) GEPA decided not to change the prompt, (2) Only 1 iteration was run, or (3) GEPA history format differs from expected'
                 })
         
         except Exception as e:
