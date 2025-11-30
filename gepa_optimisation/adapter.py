@@ -3,6 +3,9 @@ from typing import Callable, Any
 from mledojo.gym.env import KaggleEnvironment
 from mledojo.gym.competition import CompetitionRegistry, CompInfo
 from mledojo.competitions import get_metric
+import csv
+import os
+from datetime import datetime
 
 class MLEDojoGEPAAdapter(GEPAAdapter):
     def __init__(self, 
@@ -12,7 +15,8 @@ class MLEDojoGEPAAdapter(GEPAAdapter):
                  agent_factory: Callable[[str], Any], 
                  max_steps: int = 10,
                  execution_timeout: int = 600,
-                 score_mode: str = "position"):
+                 score_mode: str = "position",
+                 log_dir: str = "./logs"):
         """
         Args:
             competition_name: The Kaggle competition name (e.g., 'titanic').
@@ -22,14 +26,68 @@ class MLEDojoGEPAAdapter(GEPAAdapter):
             max_steps: Safety limit for agent iterations per episode.
             execution_timeout: Timeout for code execution in seconds.
             score_mode: Scoring mode ('position' or 'raw').
+            log_dir: Directory to save CV score logs.
         """
         self.competition_name = competition_name
         self.data_dir = data_dir
         self.output_dir = output_dir
         self.agent_factory = agent_factory
-        self.max_steps = max_steps
-        self.execution_timeout = execution_timeout
         self.score_mode = score_mode
+        self.log_dir = log_dir
+        
+        # Initialize CV score logging
+        os.makedirs(log_dir, exist_ok=True)
+        self.cv_log_file = os.path.join(log_dir, f"cv_scores_{competition_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv")
+        self._init_cv_log()
+        
+        # Track GEPA and agent iterations
+        self.gepa_iteration = 0
+        self.total_evaluations = 0
+    
+    def _init_cv_log(self):
+        """Initialize the CSV file for logging CV scores."""
+        with open(self.cv_log_file, 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                'timestamp',
+                'gepa_iteration', 
+                'episode_idx',
+                'agent_step',
+                'cv_score',
+                'execution_status',
+                'has_submission',
+                'final_reward',
+                'prompt_preview'
+            ])
+        print(f"[Adapter] Initialized CV score log: {self.cv_log_file}")
+    
+    def _log_cv_score(self, gepa_iter, episode_idx, agent_step, cv_score, exec_status, has_submission, final_reward, prompt_preview):
+        """Log a CV score to the CSV file."""
+        with open(self.cv_log_file, 'a', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                gepa_iter,
+                episode_idx,
+                agent_step,
+                cv_score,
+                exec_status,
+                has_submission,
+                final_reward,
+                prompt_preview
+            ])
+
+    def evaluate(self, batch: list, candidate: dict[str, str], capture_traces: bool = False) -> EvaluationBatch:
+        self.log_dir = log_dir
+        
+        # Initialize CV score logging
+        os.makedirs(log_dir, exist_ok=True)
+        self.cv_log_file = os.path.join(log_dir, f"cv_scores_{competition_name}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv")
+        self._init_cv_log()
+        
+        # Track GEPA and agent iterations
+        self.gepa_iteration = 0
+        self.total_evaluations = 0
 
     def evaluate(self, batch: list, candidate: dict[str, str], capture_traces: bool = False) -> EvaluationBatch:
         """
@@ -160,12 +218,26 @@ REMEMBER: You MUST create submission.csv in EVERY iteration. Without it, your sc
                     truncated = False
                     info = {}
                 
-                done = terminated or truncated
-                steps += 1
+                # Use CV score as reward if found and no submission reward exists
+                has_submission = reward > 0.0
+                if cv_score > 0 and reward == 0.0:
+                    reward = cv_score
+                    print(f"[Adapter] ✓ Using CV score from iteration output as reward: {reward:.4f}")
                 
-                # Log the result
-                feedback_str = str(obs.get("feedback", obs))
-                episode_trace.append(f"Execution Output:\n{feedback_str[:500]}...")
+                # Log CV score if extracted
+                if cv_score > 0:
+                    self._log_cv_score(
+                        gepa_iter=self.gepa_iteration,
+                        episode_idx=episode_idx,
+                        agent_step=steps,
+                        cv_score=cv_score,
+                        exec_status=execution_status,
+                        has_submission=has_submission,
+                        final_reward=reward,
+                        prompt_preview=base_system_prompt[:100]
+                    )
+                
+                print(f"[Adapter] Step {steps}: action_status='{status_str}', exec_status='{execution_status}', reward={reward:.4f}, is_success={is_success}")
                 
                 # Determine success based on execution status, not submission status
                 # KaggleEnvironment returns obs with "action_status" and "execution_status" keys
@@ -219,16 +291,21 @@ REMEMBER: You MUST create submission.csv in EVERY iteration. Without it, your sc
                 }
 
             # 3. The Agent Loop
-            while not done and steps < self.max_steps:
-                try:
-                    print(f"[Adapter] Calling agent.step() - iteration {steps + 1}/{self.max_steps}")
-                    # The agent plans and generates code, then calls our bridge
-                    agent.step(exec_callback=env_bridge_callback)
-                    print(f"[Adapter] agent.step() completed, journal now has {len(agent.journal.nodes)} nodes")
-                except Exception as e:
-                    import traceback
-                    error_detail = traceback.format_exc()
-                    print(f"[Adapter] Agent crashed: {str(e)}")
+        scores = [float(rollout["score"]) for rollout in rollout_outputs]
+        trajectories = full_traces if capture_traces else None
+        
+        print(f"[Adapter] Returning {len(rollout_outputs)} outputs with scores: {scores}")
+        print(f"[Adapter] CV scores logged to: {self.cv_log_file}")
+        
+        # Increment GEPA iteration counter for next evaluation
+        self.gepa_iteration += 1
+        self.total_evaluations += len(rollout_outputs)
+        
+        return EvaluationBatch(
+            outputs=rollout_outputs,
+            scores=scores,
+            trajectories=trajectories
+        )           print(f"[Adapter] Agent crashed: {str(e)}")
                     print(f"[Adapter] Traceback:\n{error_detail}")
                     episode_trace.append(f"Agent Crashed: {str(e)}\n{error_detail}")
                     break

@@ -139,6 +139,7 @@ def main():
         )
 
     # --- C. Initialize Adapter ---
+    log_dir = os.path.abspath("./gepa_logs")
     adapter = MLEDojoGEPAAdapter(
         competition_name=competition_name,
         data_dir=data_dir,
@@ -146,7 +147,8 @@ def main():
         agent_factory=agent_factory,
         max_steps=8,  # Limit steps to save tokens during optimization
         execution_timeout=600,
-        score_mode="position"
+        score_mode="position",
+        log_dir=log_dir
     )
 
     # --- D. Configure Initial Prompt ---
