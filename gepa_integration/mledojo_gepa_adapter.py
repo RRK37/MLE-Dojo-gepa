@@ -26,7 +26,7 @@ from mledojo.utils import load_config, create_config_from_args, get_metric
 
 logger = logging.getLogger("gepa_mledojo")
 
-print("DEBUG: Loaded MLEDojoGEPAAdapter module v4 (Nested Data Dir Fix)", file=sys.stderr)
+print("DEBUG: Loaded MLEDojoGEPAAdapter module v5 (Crash Fixes & Step Sync)", file=sys.stderr)
 
 @dataclass
 class CompetitionConfig:
@@ -161,8 +161,6 @@ class MLEDojoGEPAAdapter:
              raise ValueError("Config preparation failed: 'desc_file' missing")
 
         # Determine competition data path for registry
-        # The registry usually expects the folder containing 'public'/'private'
-        # Since _prepare_config now ensures config['competition']['data_dir'] points there, use it directly.
         comp_data_path = config['competition']['data_dir']
         
         # Get metric class
@@ -198,7 +196,6 @@ class MLEDojoGEPAAdapter:
         print(f"DEBUG: Setting up AIDE agent with desc_file: {config.get('desc_file')}", file=sys.stderr)
         
         # FINAL SAFETY CHECK: If the description file doesn't exist, CREATE IT.
-        # This prevents the specific FileNotFoundError we've been seeing.
         desc_file = config.get('desc_file')
         if desc_file and not os.path.exists(desc_file):
             print(f"WARNING: Description file missing at {desc_file}. Creating fallback.", file=sys.stderr)
@@ -227,6 +224,36 @@ class MLEDojoGEPAAdapter:
                 logger.warning(f"Step {step} failed: {e}")
                 break
         
+        # --- CRITICAL FIX START: Handle Empty Journal Nodes ---
+        if not journal.nodes:
+            logger.warning(f"Run {run_id} produced no nodes. Returning score 0.0.")
+            
+            # Create failure trajectory
+            trajectory = None
+            if capture_trace:
+                trajectory = ExecutionTrajectory(
+                    journal_export={},
+                    conversation_history=getattr(agent, 'conversation_history', []),
+                    cost_history=getattr(agent, 'cost_history', []),
+                    final_score=0.0,
+                    best_score=0.0,
+                    num_good_nodes=0,
+                    num_buggy_nodes=0,
+                    failure_patterns=["Agent failed to produce any solution nodes (likely LLM Config Error)."]
+                )
+                
+            return {
+                'output': {
+                    'competition': comp_config.name,
+                    'num_nodes': 0,
+                    'num_good_nodes': 0,
+                    'best_score': 0.0
+                },
+                'score': 0.0,
+                'trajectory': trajectory
+            }
+        # --- CRITICAL FIX END ---
+
         # Extract results
         best_node = journal.get_best_node(only_good=False)
         best_score = best_node.position_score if best_node and best_node.position_score else 0.0
@@ -257,7 +284,7 @@ class MLEDojoGEPAAdapter:
         abs_data_base = os.path.abspath(comp_config.data_dir)
         comp_root = os.path.join(abs_data_base, comp_config.name)
         
-        # CRITICAL FIX: The actual data structure is <comp>/data/public/...
+        # The actual data structure is <comp>/data/public/...
         # So the 'data_dir' passed to AIDE must be <comp>/data
         nested_data_dir = os.path.join(comp_root, "data")
         
@@ -272,7 +299,6 @@ class MLEDojoGEPAAdapter:
         config['competition']['data_dir'] = final_data_dir
         
         # Now determine description path based on the FINAL data dir
-        # Expected structure: <final_data_dir>/public/description.txt
         expected_desc_path = os.path.join(final_data_dir, "public", "description.txt")
         
         if os.path.exists(expected_desc_path):
@@ -295,17 +321,18 @@ class MLEDojoGEPAAdapter:
             
             if not found:
                 print(f"ERROR: Description NOT FOUND. Expected at {expected_desc_path}", file=sys.stderr)
-                # If we still can't find it, we MUST set desc_file to something, 
-                # or AIDE will default to constructing a path that doesn't exist.
-                # We'll stick to the expected path and let the fallback creator in _run_aide_agent handle it.
                 config['desc_file'] = expected_desc_path
             
         config['env']['max_steps'] = comp_config.max_steps
         config['env']['execution_timeout'] = comp_config.execution_timeout
-        config['agent']['steps'] = comp_config.max_steps
-        config['output_dir'] = comp_config.output_dir
-
         
+        # --- FIX: Sync Agent Steps with Environment Steps ---
+        if 'agent' not in config:
+            config['agent'] = {}
+        config['agent']['steps'] = comp_config.max_steps
+        # --------------------------------------------------
+        
+        config['output_dir'] = comp_config.output_dir
         
         return config
     
