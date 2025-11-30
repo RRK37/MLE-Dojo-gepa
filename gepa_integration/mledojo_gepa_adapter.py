@@ -20,6 +20,7 @@ from mledojo.agent.aide.buildup import setup_aide_agent
 from mledojo.agent.aide.agent import Agent
 from mledojo.agent.aide.journal import Journal
 from mledojo.gym.env import KaggleEnvironment
+from mledojo.gym.competition import CompetitionRegistry, CompInfo
 from mledojo.utils import load_config, create_config_from_args, get_metric
 
 logger = logging.getLogger("gepa_mledojo")
@@ -161,11 +162,33 @@ class MLEDojoGEPAAdapter:
         # Prepare configuration
         config = self._prepare_config(comp_config)
         
+        # Determine competition data path
+        # Assumes structure: <data_dir>/<competition_name>/data/
+        comp_data_path = os.path.join(comp_config.data_dir, comp_config.name, "data")
+        
+        # Get metric class and determine higher_is_better
+        metric_class = get_metric(comp_config.name)
+        higher_is_better = metric_class().higher_is_better
+        
+        # Create registry and register the competition
+        # This is required because KaggleEnvironment expects a registry instance
+        registry = CompetitionRegistry(
+            name=comp_config.name,
+            data_dir=comp_data_path,
+            comp_info=CompInfo(
+                category="Tabular",  # Defaulting, could be inferred if needed
+                level="intermediate",
+                output_type="submission.csv",
+                higher_is_better=higher_is_better
+            ),
+            metric_class=metric_class
+        )
+        
         # Setup environment
         env = KaggleEnvironment(
             competition_name=comp_config.name,
-            data_dir=config['competition']['data_dir'],
             output_dir=config['output_dir'],
+            competition_registry=registry,
             render_mode=config['env']['render_mode']
         )
         

@@ -2,14 +2,14 @@
 data_dir: ../../../../data/
 
 # Task name required, should be consistent with desc_file and data_dir
-name: titanic 
+name: spooky-author-identification
 # either provide a path to a plaintext file describing the task
-desc_file: ../../../../data/titanic/data/public/description.txt
+desc_file: ../../../../data/spooky-author-identification/data/public/description.txt
 # or provide the task goal (and optionally evaluation information) as arguments
 goal: null
 eval: null
 
-log_dir: ../../../../outputs/titanic/logs
+log_dir: ../../../../outputs/spooky-author-identification/logs
 workspace_dir: ../../../../outputs/
 
 # whether to unzip any archives in the data directory
@@ -40,8 +40,8 @@ agent:
 
   # LLM settings for coding
   code:
-    model_mode: gpt
-    model_name: gpt-4o-mini
+    model_mode: anthropic
+    model_name: claude-sonnet-4-20250514
     port: 8314  # Port for local model
     max_completion_tokens: 8192  # Maximum tokens for completion
     max_prompt_tokens: 30000 

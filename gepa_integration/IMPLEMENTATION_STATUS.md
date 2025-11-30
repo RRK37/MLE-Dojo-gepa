@@ -27,7 +27,7 @@ This implementation provides a complete framework for using GEPA to optimize AID
 ```bash
 # Basic test run
 python gepa_integration/run_gepa_optimization.py \
-    --competition titanic \
+    --competition spooky-author-identification \
     --max-iterations 1
 
 # Full optimization

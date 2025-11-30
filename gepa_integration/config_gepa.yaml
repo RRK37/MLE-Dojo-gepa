@@ -6,19 +6,18 @@ gepa:
   max_iterations: 10
   
   # LLM for reflection and prompt improvement
-  reflection_lm: "openai/gpt-4o"
+  reflection_lm: "anthropic/claude-sonnet-4-20250514"
   
   # LLM used by AIDE agent (being optimized)
-  task_lm: "openai/gpt-4o-mini"
+  task_lm: "anthropic/claude-sonnet-4-20250514"
   
   # Training competitions (used for optimization)
   train_competitions:
-    - "titanic"
-    - "spaceship-titanic"
+    - "spooky-author-identification"
   
   # Validation competitions (used for evaluation)
   val_competitions:
-    - "house-prices-advanced-regression-techniques"
+    - "spooky-author-identification"
   
   # Number of competitions to sample per batch
   train_batch_size: 2
