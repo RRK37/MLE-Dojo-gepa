@@ -675,6 +675,7 @@ class Agent:
                 self._theme_cache_size = current_size
         
         if self._theme_cache:
+            print(self._theme_cache)
             return {"Learned Patterns": self._theme_cache}
         else:
             return {}
