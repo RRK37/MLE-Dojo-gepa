@@ -43,8 +43,10 @@ class Agent:
         higher_is_better: bool,
         data_dir: str, 
         output_dir: str,
+        system_prompt: str = None, # <--- [MODIFICATION] New optional argument
     ):
         super().__init__()
+        self.system_prompt = system_prompt # <--- [MODIFICATION] Store the override
         self.total_cost = 0.0
         self.task_desc = task_desc
         self.cfg = cfg
@@ -226,12 +228,16 @@ class Agent:
         return "","", completion_text  # type: ignore
 
     def _draft(self) -> Node:
+        # <--- [MODIFICATION] START: Use GEPA prompt or Fallback
+        base_persona = self.system_prompt if self.system_prompt else "You are a Kaggle grandmaster attending a competition."
+        
         prompt: Any = {
             "Introduction": (
-                "You are a Kaggle grandmaster attending a competition. "
+                f"{base_persona} " # Inject GEPA prompt
                 "In order to win this competition, you need to come up with an excellent and creative plan "
                 "for a solution and then implement this solution in Python. We will now provide a description of the task."
             ),
+        # <--- [MODIFICATION] END
             "Task description": self.task_desc,
             "Memory": self.journal.generate_summary(),
             "Instructions": {},
@@ -265,13 +271,18 @@ class Agent:
         return Node(plan=plan, code=code, instruction_prompt=compile_prompt_to_md(prompt), node_type="draft", assistant=assistant)
 
     def _improve(self, parent_node: Node) -> Node:
+        # <--- [MODIFICATION] START: Use GEPA prompt or Fallback
+        base_persona = self.system_prompt if self.system_prompt else "You are a Kaggle grandmaster attending a competition."
+
         prompt: Any = {
             "Introduction": (
-                "You are a Kaggle grandmaster attending a competition. You are provided with a previously developed "
+                f"{base_persona} " # Inject GEPA prompt
+                "You are provided with a previously developed "
                 "solution below and should improve it in order to further increase the (test time) performance, i.e. the position score provided by the competition. "
                 "For this you should first outline a brief plan in natural language for how the solution can be improved and "
                 "then implement this improvement in Python based on the provided previous solution. "
             ),
+        # <--- [MODIFICATION] END
             "Task description": self.task_desc,
             "Memory": self.journal.generate_summary(),
             "Instructions": {},
@@ -310,13 +321,17 @@ class Agent:
         )
 
     def _debug(self, parent_node: Node) -> Node:
+        # <--- [MODIFICATION] START: Use GEPA prompt or Fallback
+        base_persona = self.system_prompt if self.system_prompt else "You are a Kaggle grandmaster attending a competition."
+
         prompt: Any = {
             "Introduction": (
-                "You are a Kaggle grandmaster attending a competition. "
+                f"{base_persona} " # Inject GEPA prompt
                 "Your previous solution had a bug, so based on the information below, you should revise it in order to fix this bug. "
                 "Your response should be an implementation outline in natural language,"
                 " followed by a single markdown code block which implements the bugfix/solution."
             ),
+        # <--- [MODIFICATION] END
             "Task description": self.task_desc,
             "Previous (buggy) implementation": wrap_code(parent_node.code),
             "Execution output": wrap_code(parent_node.feedback, lang=""),
