@@ -38,6 +38,9 @@ class MLEDojoGEPAAdapter(GEPAAdapter):
         # 1. Get the new prompt from GEPA (candidate is a dict, not an object)
         system_prompt = candidate['system_prompt']
         
+        print(f"\n[Adapter] Evaluating with system prompt: {system_prompt[:100]}...")
+        print(f"[Adapter] Batch size: {len(batch)}, Capture traces: {capture_traces}")
+        
         # 2. Run Episodes (1 episode per batch item, or default to 1 if batch is empty)
         num_episodes = len(batch) if batch else 1
         total_score = 0
@@ -117,13 +120,23 @@ class MLEDojoGEPAAdapter(GEPAAdapter):
 
             # 4. Finalize
             # We use the final reward from the last step as the score for this candidate
-            # (Or you could query env.get_best_score() if supported)
-            final_score = 0
+            final_score = 0.0
+            
+            print(f"[Adapter] Episode {episode_idx}: Agent generated {len(agent.journal.nodes)} nodes, Steps taken: {steps}")
+            
             if agent.journal.nodes:
                 # Retrieve the best score recorded in the agent's journal
-                best_node = agent.journal.get_best_node()
-                if best_node and best_node.metric:
-                    final_score = best_node.metric.value
+                best_node = agent.journal.get_best_node(only_good=False)  # Get best even if buggy
+                if best_node:
+                    if hasattr(best_node, 'metric') and best_node.metric:
+                        final_score = float(best_node.metric.value)
+                        print(f"[Adapter] Best node score: {final_score}")
+                    else:
+                        print(f"[Adapter] Best node has no metric, using 0.0")
+                else:
+                    print(f"[Adapter] No best node found, using 0.0")
+            else:
+                print(f"[Adapter] No nodes in journal, agent didn't execute successfully")
 
             total_score += final_score
             trace_str = "\n".join(episode_trace) if capture_traces else ""
@@ -140,8 +153,10 @@ class MLEDojoGEPAAdapter(GEPAAdapter):
 
         # Return EvaluationBatch as expected by GEPA
         # EvaluationBatch expects: outputs (list of rollout outputs), scores (list of floats), trajectories (optional)
-        scores = [rollout["score"] for rollout in rollout_outputs]
+        scores = [float(rollout["score"]) for rollout in rollout_outputs]
         trajectories = full_traces if capture_traces else None
+        
+        print(f"[Adapter] Returning {len(rollout_outputs)} outputs with scores: {scores}")
         
         return EvaluationBatch(
             outputs=rollout_outputs,
