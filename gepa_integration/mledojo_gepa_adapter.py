@@ -78,7 +78,7 @@ class MLEDojoGEPAAdapter:
         self.base_config = base_config
         self.verbose = verbose
         self.run_counter = 0
-        # FIX: Initialize this attribute to None to satisfy GEPA checks
+        # Initialize this attribute to None to satisfy GEPA checks
         self.propose_new_texts = None
         
     def evaluate(
@@ -154,7 +154,7 @@ class MLEDojoGEPAAdapter:
         config = self._prepare_config(comp_config)
         
         # Determine competition data path
-        # FIX: Ensure we point to the inner data folder: data/prepared/<comp>/data
+        # Ensure we point to the inner data folder: data/prepared/<comp>/data
         comp_data_path = os.path.join(config['competition']['data_dir'], "data")
         
         # Get metric class
@@ -225,7 +225,7 @@ class MLEDojoGEPAAdapter:
             'trajectory': trajectory
         }
     
-def _prepare_config(self, comp_config: CompetitionConfig) -> Dict[str, Any]:
+    def _prepare_config(self, comp_config: CompetitionConfig) -> Dict[str, Any]:
         """Prepare configuration dict for AIDE agent"""
         config = self.base_config.copy()
         
@@ -247,8 +247,6 @@ def _prepare_config(self, comp_config: CompetitionConfig) -> Dict[str, Any]:
         else:
             # If we can't find it, log clearly where we looked
             logger.error(f"FILE MISSING: Expected description at {desc_path}")
-            # Do NOT set it to None if you want to avoid AIDE guessing the wrong path.
-            # But if it's missing, the agent will likely fail anyway.
             config['desc_file'] = desc_path 
             
         config['env']['max_steps'] = comp_config.max_steps
@@ -262,7 +260,7 @@ def _prepare_config(self, comp_config: CompetitionConfig) -> Dict[str, Any]:
         journal: Journal,
         agent: Agent,
         final_score: float
-        ) -> ExecutionTrajectory:
+    ) -> ExecutionTrajectory:
         
         failure_patterns = []
         for node in journal.buggy_nodes:
