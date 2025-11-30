@@ -179,48 +179,13 @@ REMEMBER: You MUST create submission.csv in EVERY iteration. Without it, your sc
                 is_success = (status_str == "SUCCESS" or reward > 0.0 or execution_succeeded)
                 
                 # Extract CV score from stdout if no submission reward
-                # Look for patterns like "5-fold cross-validation accuracy: 0.8137" in stdout
-                cv_score = 0.0
-                if reward == 0.0 and execution_succeeded:
-                    # Try to extract score from execution stdout
-                    import re
-                    
-                    # Method 1: Check feedback structure
-                    print(f"[Adapter Debug] Obs keys: {obs.keys()}")
-                    if "feedback" in obs:
-                        print(f"[Adapter Debug] Feedback type: {type(obs['feedback'])}")
-                        if isinstance(obs["feedback"], dict):
-                            print(f"[Adapter Debug] Feedback keys: {obs['feedback'].keys()}")
-                            for feedback_key, feedback_data in obs["feedback"].items():
-                                print(f"[Adapter Debug] Checking feedback key: {feedback_key}")
-                                if isinstance(feedback_data, dict) and "raw_results" in feedback_data:
-                                    exec_result = feedback_data["raw_results"].get("execution", {})
-                                    stdout_text = exec_result.get("stdout", "")
-                                    print(f"[Adapter Debug] Stdout found (len={len(stdout_text)}): {stdout_text[:100]}...")
-                                    
-                                    if stdout_text:
-                                        # Parse patterns - looking for any accuracy/score output
-                                        # Matches: "accuracy: 0.8058" or "score: 0.8058" or "accuracy  0.8058"
-                                        patterns = [
-                                            r'(?:cross-?validation|cross-?validated|cv|validation)\s+(?:accuracy|score)[:\s]+([0-9.]+)',
-                                            r'accuracy[:\s]+([0-9.]+)',
-                                            r'score[:\s]+([0-9.]+)',
-                                        ]
-                                        for pattern in patterns:
-                                            match = re.search(pattern, stdout_text, re.IGNORECASE)
-                                            if match:
-                                                cv_score = float(match.group(1))
-                                                print(f"[Adapter] Extracted CV score {cv_score} from stdout using pattern: {pattern}")
-                                                break
-                                    if cv_score > 0:
-                                        break
-                    
-                    # Use CV score as reward if found
-                    if cv_score > 0:
-                        reward = cv_score
-                        print(f"[Adapter] Using CV score as reward: {reward:.4f}")
-                    else:
-                        print(f"[Adapter] No CV score found in execution output")
+                # This is critical for GEPA optimization when agents explore solutions without submissions
+                cv_score = self._extract_cv_score_from_output(obs, execution_succeeded)
+                
+                # Use CV score as reward if found and no submission reward exists
+                if cv_score > 0 and reward == 0.0:
+                    reward = cv_score
+                    print(f"[Adapter] Using CV score from iteration output as reward: {reward:.4f}")
                 
                 print(f"[Adapter] Step {steps}: action_status='{status_str}', exec_status='{execution_status}', reward={reward:.4f}, is_success={is_success}")
                 
@@ -300,3 +265,78 @@ REMEMBER: You MUST create submission.csv in EVERY iteration. Without it, your sc
             scores=scores,
             trajectories=trajectories
         )
+    
+    def _extract_cv_score_from_output(self, obs: dict, execution_succeeded: bool) -> float:
+        """
+        Extract cross-validation score from execution stdout.
+        
+        This method parses the agent's code execution output to find CV scores,
+        which provides a reward signal even when no submission.csv is created.
+        This is essential for GEPA optimization to evaluate intermediate solutions.
+        
+        Args:
+            obs: Observation dictionary from environment step
+            execution_succeeded: Whether code execution succeeded (no syntax/runtime errors)
+            
+        Returns:
+            CV score if found, 0.0 otherwise
+        """
+        if not execution_succeeded:
+            return 0.0
+            
+        import re
+        
+        # Navigate the observation structure to find stdout
+        # Structure: obs["feedback"][mode]["raw_results"]["execution"]["stdout"]
+        if "feedback" not in obs:
+            return 0.0
+        
+        feedback = obs["feedback"]
+        if not isinstance(feedback, dict):
+            return 0.0
+        
+        # Iterate through feedback modes (e.g., "base", "structured")
+        for feedback_mode, feedback_data in feedback.items():
+            if not isinstance(feedback_data, dict):
+                continue
+                
+            # Get raw execution results
+            raw_results = feedback_data.get("raw_results", {})
+            if not isinstance(raw_results, dict):
+                continue
+            
+            # Get execution stdout
+            exec_result = raw_results.get("execution", {})
+            stdout_text = exec_result.get("stdout", "")
+            
+            if not stdout_text:
+                continue
+            
+            print(f"[Adapter] Searching for CV score in stdout (length: {len(stdout_text)})")
+            
+            # Parse CV score patterns from stdout
+            # Common patterns:
+            # - "5-fold cross-validation accuracy: 0.8137"
+            # - "Cross-validation score: 0.8137"
+            # - "CV accuracy: 0.8137"
+            # - "Accuracy: 0.8137" (fallback)
+            patterns = [
+                r'(?:cross[-\s]?validation|cv)\s+(?:accuracy|score)[:\s]+([0-9.]+)',
+                r'(?:validation|test)\s+(?:accuracy|score)[:\s]+([0-9.]+)',
+                r'accuracy[:\s]+([0-9.]+)',
+                r'score[:\s]+([0-9.]+)',
+            ]
+            
+            for pattern in patterns:
+                match = re.search(pattern, stdout_text, re.IGNORECASE)
+                if match:
+                    cv_score = float(match.group(1))
+                    # Sanity check: scores should be between 0 and 1 (or 0-100 if percentage)
+                    if cv_score > 1.0:
+                        cv_score = cv_score / 100.0  # Convert percentage to decimal
+                    if 0.0 <= cv_score <= 1.0:
+                        print(f"[Adapter] Extracted CV score: {cv_score:.4f} using pattern: {pattern}")
+                        return cv_score
+        
+        print(f"[Adapter] No CV score found in execution output")
+        return 0.0
