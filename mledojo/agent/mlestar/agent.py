@@ -87,6 +87,9 @@ class MLEStarAgent:
         self.error_history: List[Dict] = []  # [{"timestep": int, "phase": str, "error": str, "traceback": str}]
         self.timestep = 0
         
+        # Bug history to avoid loops (like AIDE journal)
+        self.bug_history: List[Dict] = []  # [{"code_hash": str, "error": str, "attempt": int, "fix_attempted": str, "code_snippet": str}]
+        
         # LLM settings
         self.llm_config = self.acfg.code
         self.tokenizer = tiktoken.encoding_for_model('gpt-4')
@@ -454,7 +457,8 @@ class MLEStarAgent:
     
     def _generate_ablation_study(self, solution: str, previous_ablations: List[str]) -> Optional[str]:
         """A_abl: Generate ablation study (Prompt 4)."""
-        prompt = prompts.prompt_4_ablation_study(solution, previous_ablations)
+        available_packages = self._get_available_packages()
+        prompt = prompts.prompt_4_ablation_study(solution, previous_ablations, available_packages)
         response = self._safe_query_llm(prompt)
         code = extract_code(response)
         return code if code else None
@@ -485,7 +489,8 @@ class MLEStarAgent:
     
     def _refine_code_block(self, code_block: str, plan: str) -> str:
         """A_coder: Refine code block (Prompt 7)."""
-        prompt = prompts.prompt_7_refine_code_block(code_block, plan)
+        available_packages = self._get_available_packages()
+        prompt = prompts.prompt_7_refine_code_block(code_block, plan, available_packages)
         response = self._safe_query_llm(prompt)
         refined = extract_code(response)
         return refined if refined else code_block
@@ -579,20 +584,26 @@ class MLEStarAgent:
     
     # ========== Validation & Debugging ==========
     
-    def _debug_code(self, code: str, error: str, parent_node: Optional[Node] = None) -> Optional[str]:
+    def _debug_code(self, code: str, error: str, parent_node: Optional[Node] = None, attempt: int = 1) -> Optional[str]:
         """
-        Debug code with error (Prompt 11).
+        Debug code with error (Prompt 11) - Enhanced with full context like AIDE.
         
-        Enhanced with context like AIDE:
-        - Task description
-        - Data preview
-        - Previous execution feedback
-        - Parent node context (if available)
+        Features:
+        - Full execution feedback (stdout, stderr, error details)
+        - Task description and data preview
+        - Bug history to avoid loops
+        - Journal context from parent nodes
+        - Explicit logging of what's passed in and how it intends to fix
         """
-        # Build enhanced prompt with context (like AIDE does)
+        import hashlib
+        
+        # Create code hash for bug history tracking
+        code_hash = hashlib.md5(code.encode()).hexdigest()[:8]
+        
+        # Extract full error info from parent node (like AIDE)
         error_info = error
+        full_feedback = ""
         if parent_node and parent_node.feedback:
-            # Use feedback from parent node if available
             feedback = parent_node.feedback
             if isinstance(feedback, dict):
                 execution = feedback.get("execution", {})
@@ -600,23 +611,115 @@ class MLEStarAgent:
                     stderr = execution.get("stderr", "")
                     stdout = execution.get("stdout", "")
                     error_msg = execution.get("error", "")
-                    if stderr or error_msg:
-                        error_info = f"{error_msg}\n{stderr}" if error_msg else stderr
-                    elif stdout:
-                        error_info = f"Execution output:\n{stdout}\n\nError: {error}"
+                    details = execution.get("details", "")
+                    
+                    # Build comprehensive error info
+                    error_parts = []
+                    if stdout:
+                        error_parts.append(f"STDOUT:\n{stdout}")
+                    if stderr:
+                        error_parts.append(f"STDERR:\n{stderr}")
+                    if error_msg:
+                        error_parts.append(f"ERROR: {error_msg}")
+                    if details:
+                        error_parts.append(f"DETAILS: {details}")
+                    
+                    if error_parts:
+                        error_info = "\n".join(error_parts)
+                        full_feedback = error_info
+                elif isinstance(execution, str):
+                    error_info = execution
+                    full_feedback = execution
             elif isinstance(feedback, str):
                 error_info = feedback
+                full_feedback = feedback
         
-        # Use the base prompt
-        prompt = prompts.prompt_11_debug(code, error_info, self.data_dir)
+        # Get relevant bug history (same error pattern or same code)
+        relevant_bug_history = [
+            b for b in self.bug_history 
+            if b.get("code_hash") == code_hash or error[:100] in b.get("error", "")
+        ][-5:]  # Last 5 relevant attempts
         
-        # Enhance with context like AIDE (if we have task_desc and data_preview)
-        # Note: The prompt_11_debug already has code and error, but we could add more context
-        # For now, keeping it simple but extensible
+        # Check if we're in a loop (same error multiple times)
+        if len(relevant_bug_history) >= 3:
+            logger.warning(f"⚠️ Potential debug loop detected: {len(relevant_bug_history)} similar attempts for code hash {code_hash}")
+            logger.warning(f"Error pattern: {error[:100]}...")
         
+        # Explicit logging of what's being passed to debug
+        logger.info("=" * 80)
+        logger.info(f"🔧 DEBUG ATTEMPT {attempt}")
+        logger.info("=" * 80)
+        logger.info(f"Code length: {len(code)} characters")
+        logger.info(f"Code hash: {code_hash}")
+        logger.info(f"Error type: {type(error).__name__}")
+        logger.info(f"Error preview: {error[:200]}...")
+        logger.info(f"Parent node: {parent_node.id if parent_node else 'None'}")
+        logger.info(f"Task description available: {bool(self.task_desc)}")
+        logger.info(f"Data preview available: {bool(self.data_preview)}")
+        logger.info(f"Full feedback available: {bool(full_feedback)}")
+        logger.info(f"Relevant bug history entries: {len(relevant_bug_history)}")
+        if relevant_bug_history:
+            logger.info(f"Previous attempts: {[b.get('attempt') for b in relevant_bug_history]}")
+        logger.info("-" * 80)
+        
+        # Get available packages
+        available_packages = self._get_available_packages()
+        
+        # Build enhanced prompt with ALL context (like AIDE)
+        prompt = prompts.prompt_11_debug(
+            code=code,
+            bug=error_info,
+            data_dir=self.data_dir,
+            task_desc=self.task_desc,
+            data_preview=self.data_preview,
+            available_packages=available_packages,
+            bug_history=relevant_bug_history
+        )
+        
+        # Log what we're asking the LLM to do
+        logger.info("📝 PROMPT CONTEXT PASSED TO LLM:")
+        logger.info(f"  - Task description: {'Yes' if self.task_desc else 'No'} ({len(self.task_desc) if self.task_desc else 0} chars)")
+        logger.info(f"  - Data preview: {'Yes' if self.data_preview else 'No'} ({len(self.data_preview) if self.data_preview else 0} chars)")
+        logger.info(f"  - Full execution feedback: {'Yes' if full_feedback else 'No'} ({len(full_feedback)} chars)")
+        logger.info(f"  - Bug history: {len(relevant_bug_history)} entries")
+        logger.info(f"  - Available packages: Included")
+        logger.info("-" * 80)
+        
+        # Query LLM
+        logger.info("🤖 Querying LLM for fix...")
         response = self._safe_query_llm(prompt)
         fixed_code = extract_code(response)
-        return fixed_code if fixed_code else None
+        
+        if fixed_code:
+            # Extract plan/intent from response (like AIDE does)
+            fix_plan = extract_text_up_to_code(response)
+            fix_plan = fix_plan[:500] if fix_plan else "No plan extracted"
+            
+            # Log what the LLM intends to fix
+            logger.info("✅ LLM RESPONSE RECEIVED:")
+            logger.info(f"  - Fixed code length: {len(fixed_code)} characters")
+            logger.info(f"  - Fix plan/intent: {fix_plan[:200]}...")
+            logger.info(f"  - Code changed: {fixed_code != code}")
+            
+            # Record in bug history
+            self.bug_history.append({
+                "code_hash": code_hash,
+                "error": error[:500],  # Truncate for storage
+                "attempt": attempt,
+                "fix_attempted": fix_plan[:500],
+                "code_snippet": code[:200]  # First 200 chars for context
+            })
+            
+            # Keep bug history manageable (last 20 entries)
+            if len(self.bug_history) > 20:
+                self.bug_history = self.bug_history[-20:]
+            
+            logger.info("=" * 80)
+            return fixed_code
+        else:
+            logger.warning("❌ LLM failed to produce fixed code")
+            logger.info("=" * 80)
+            return None
     
     def _check_data_leakage(self, code: str) -> Tuple[bool, Optional[str]]:
         """Check for data leakage (Prompt 12)."""
@@ -783,8 +886,8 @@ class MLEStarAgent:
             logger.info(f"Debug attempt {attempt + 1}/{max_debug_attempts}")
             logger.debug(f"Error: {error_info[:200]}...")  # Log first 200 chars
             
-            # Debug with context from parent node (like AIDE)
-            fixed_code = self._debug_code(current_code, error_info, parent_node=debug_node)
+            # Debug with context from parent node (like AIDE) - pass attempt number
+            fixed_code = self._debug_code(current_code, error_info, parent_node=debug_node, attempt=attempt + 1)
             if not fixed_code:
                 logger.warning("Debug failed to produce fixed code")
                 break

@@ -100,7 +100,7 @@ Return: list[Model]"""
 - Do not use try: and except: or if else to ignore unintended behavior."""
 
     @staticmethod
-    def prompt_4_ablation_study(solution_script: str, previous_ablations: List[str]) -> str:
+    def prompt_4_ablation_study(solution_script: str, previous_ablations: List[str], available_packages: str = "") -> str:
         """Prompt 4: Generate ablation study."""
         prev_ablation_text = ""
         for i, prev_ablation in enumerate(previous_ablations):
@@ -121,6 +121,7 @@ Return: list[Model]"""
 - The generated code should create variations by modifying or disabling parts (2-3 parts) of the training process.
 - Your ablation study should concentrate on the other parts that have not been previously considered.
 - For each ablation, print out how the modification affects the model's performance.
+- {available_packages}
 
 # Response format
 - There should be no additional headings or text in your response.
@@ -177,7 +178,7 @@ Refine_Plan = {{'code_block': str, 'plan': str}}
 Return: list[Refine_Plan]"""
 
     @staticmethod
-    def prompt_7_refine_code_block(code_block: str, plan: str) -> str:
+    def prompt_7_refine_code_block(code_block: str, plan: str, available_packages: str = "") -> str:
         """Prompt 7: Refine code block based on plan."""
         return f"""# Introduction
 - You are a Kaggle grandmaster attending a competition.
@@ -194,6 +195,7 @@ Return: list[Refine_Plan]"""
 - Implement the improvement plan on the above code block. But do not remove subsampling if exists.
 - The code block should be improved according to the proposed plan.
 - Note that all the variable including actual data is defined earlier (since you are just seeing a code block), therefore do not introduce dummy variables.
+- {available_packages}
 
 # Response format
 - Your response should be a single markdown code block (wrapped in ```) which is the improved code block.
@@ -256,7 +258,7 @@ Return: list[Refine_Plan]"""
 - Plan should not modify the original solutions too much since execution error can occur."""
 
     @staticmethod
-    def prompt_10_implement_ensemble(solutions: List[str], plan: str, data_dir: str) -> str:
+    def prompt_10_implement_ensemble(solutions: List[str], plan: str, data_dir: str, available_packages: str = "") -> str:
         """Prompt 10: Implement ensemble."""
         solutions_text = ""
         for i, solution in enumerate(solutions):
@@ -287,18 +289,32 @@ Return: list[Refine_Plan]"""
 - The code should be a single-file Python program that is self-contained and can be executed as-is."""
 
     @staticmethod
-    def prompt_11_debug(code: str, bug: str, data_dir: str) -> str:
-        """Prompt 11: Debug code with error."""
+    def prompt_11_debug(code: str, bug: str, data_dir: str, task_desc: str = "", data_preview: str = "", available_packages: str = "", bug_history: Optional[List[Dict]] = None) -> str:
+        """Prompt 11: Debug code with error - Enhanced with full context."""
+        bug_history_text = ""
+        if bug_history:
+            bug_history_text = "\n# Previous Debug Attempts (to avoid repeating fixes):\n"
+            for i, bug_entry in enumerate(bug_history[-3:]):  # Show last 3 attempts
+                bug_history_text += f"\n## Attempt {bug_entry.get('attempt', i+1)}:\n"
+                bug_history_text += f"Error: {bug_entry.get('error', '')[:200]}...\n"
+                bug_history_text += f"Fix attempted: {bug_entry.get('fix_attempted', '')[:200]}...\n"
+        
+        task_context = f"\n# Task Description:\n{task_desc}\n" if task_desc else ""
+        data_context = f"\n# Data Overview:\n{data_preview}\n" if data_preview else ""
+        
         return f"""# Code with an error:
 {code}
 
 # Error:
 {bug}
-
+{task_context}{data_context}{bug_history_text}
 # Your task
+- Analyze the root cause: Why did this error occur? What is the underlying issue?
 - Please revise the code to fix the error.
+- Do not repeat fixes that were already attempted (see previous debug attempts above).
 - Do not remove subsampling if exists.
 - Provide the improved, self-contained Python script again.
+- {available_packages}
 - There should be no additional headings or text in your response.
 - All the provided input data is stored in "{data_dir}" directory.
 - Remember to print a line in the code with 'Final Validation Performance: {{final_validation_score}}' so we can parse performance.

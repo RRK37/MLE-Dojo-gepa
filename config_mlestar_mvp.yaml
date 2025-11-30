@@ -44,8 +44,8 @@ agent:
   # ========================================================================
   # LLM Configuration
   # ========================================================================
-  model_mode: "claude"  # Options: claude, openai, gemini, gpt
-  model_name: "claude-opus-4-5"  # Latest Claude Opus 4.5 (released Nov 24, 2025) - best for MLE-STAR
+  model_mode: "openai"  # Options: claude, openai, gemini, gpt
+  model_name: "gpt-5"  # Upgraded to GPT-5 for better performance
   # Alternative models:
   #   - "gpt-4o-mini" (faster, cheaper)
   #   - "gpt-4o" (better quality)
