@@ -202,26 +202,26 @@ def main():
         logger.warning("3. Handle iteration logging with gepa_logger")
         logger.warning("4. Save best candidate prompts")
         
-        # Placeholder for gepa.optimize call:
-        # result = gepa.optimize(
-        #     seed_candidate=seed_candidate,
-        #     trainset=trainset,
-        #     valset=valset,
-        #     task_lm=gepa_config['gepa']['task_lm'],
-        #     reflection_lm=gepa_config['gepa']['reflection_lm'],
-        #     max_metric_calls=gepa_config['gepa']['max_iterations'],
-        #     adapter=adapter
-        # )
+        Placeholder for gepa.optimize call:
+        result = gepa.optimize(
+             seed_candidate=seed_candidate,
+             trainset=trainset,
+             valset=valset,
+             task_lm=gepa_config['gepa']['task_lm'],
+             reflection_lm=gepa_config['gepa']['reflection_lm'],
+             max_metric_calls=gepa_config['gepa']['max_iterations'],
+             adapter=adapter
+        )
         
         # For now, just demonstrate the adapter works
-        logger.info("Testing adapter with seed candidate...")
-        test_batch = trainset[:1]  # Test with one competition
+        #logger.info("Testing adapter with seed candidate...")
+        #test_batch = trainset[:1]  # Test with one competition
         
-        eval_result = adapter.evaluate(
-            batch=test_batch,
-            candidate=seed_candidate,
-            capture_traces=True
-        )
+        #eval_result = adapter.evaluate(
+        #    batch=test_batch,
+        #    candidate=seed_candidate,
+        #    capture_traces=True
+        #)
         
         logger.info(f"Test evaluation completed:")
         logger.info(f"  - Outputs: {len(eval_result['outputs'])}")
