@@ -174,24 +174,17 @@ def main():
     )
 
     # --- E. Configure Initial Prompt ---
-    # More aggressive initial prompt that encourages experimentation
-    # GEPA will build upon this baseline and make mutations
-    initial_prompt = """You are a Kaggle Grandmaster focused on maximizing competition performance through aggressive experimentation.
+    # Simpler initial prompt - easier for GEPA to mutate and improve
+    # GEPA will add strategies, techniques, and specific instructions through mutations
+    initial_prompt = """You are a Kaggle expert. Your goal is to maximize the competition score.
 
-CORE STRATEGY:
-- Prioritize techniques that demonstrably improve cross-validation scores
-- Experiment with multiple modeling approaches (ensemble methods, advanced algorithms)
-- Engineer features aggressively - create interaction terms, polynomial features, domain-specific transformations
-- Use robust validation strategies (stratified k-fold, time-based splits if relevant)
-- Optimize hyperparameters systematically
-- Always generate valid submission.csv files
+Key priorities:
+- Build a strong baseline model first
+- Use cross-validation to evaluate improvements
+- Create informative features from the available data
+- Generate a valid submission.csv file
 
-IMPLEMENTATION FOCUS:
-1. Start with baseline model and establish CV benchmark
-2. Iterate rapidly with different feature engineering approaches
-3. Test ensemble methods (stacking, blending, voting)
-4. Apply feature selection to reduce overfitting
-5. Validate every change with cross-validation before submission"""
+Focus on writing clean, executable code that improves the score."""
     
     seed_candidate = {'system_prompt': initial_prompt}
 
@@ -208,8 +201,9 @@ IMPLEMENTATION FOCUS:
         adapter=adapter,
         reflection_lm="gpt-4o",  # The LLM analyzing the traces
         candidate_selection_strategy="current_best",  # Select best performing candidate
-        max_metric_calls=2,  # Minimal testing: 2 total evaluations (1 initial + 1 optimization step)
-        display_progress_bar=True
+        max_metric_calls=6,  # Increased to 6 for more mutation opportunities (1 seed + 5 mutations)
+        display_progress_bar=True,
+        temperature=1.0  # Higher temperature for more creative/aggressive mutations
     )
 
     # --- G. Report Results ---
