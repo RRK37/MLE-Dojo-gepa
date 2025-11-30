@@ -145,13 +145,13 @@ def main():
         data_dir=data_dir,
         output_dir=output_dir,
         agent_factory=agent_factory,
-        max_steps=8,  # Limit steps to save tokens during optimization
+        max_steps=3,  # Minimal steps for quick testing
         execution_timeout=600,
         score_mode="position"
     )
 
     # --- D. Configure Initial Prompt ---
-    initial_prompt = "You are a Kaggle Grandmaster. Focus on feature engineering and robust validation."
+    initial_prompt = "You are a Kaggle Grandmaster. Focus on improvement in cross-validation metrics and engineering and robust validation."
     seed_candidate = {'system_prompt': initial_prompt}
 
     # --- E. Run Optimization ---
@@ -159,7 +159,7 @@ def main():
     
     # GEPA requires a non-empty trainset for its reflection/sampling mechanisms
     # We provide dummy items since the adapter handles episodes internally
-    trainset = [{"episode": i} for i in range(3)]  # 3 episodes per evaluation
+    trainset = [{"episode": i} for i in range(1)]  # 1 episode per evaluation (reduced for quick testing)
     
     result = optimize(
         seed_candidate=seed_candidate,
@@ -167,7 +167,7 @@ def main():
         adapter=adapter,
         reflection_lm="gpt-4o",  # The LLM analyzing the traces
         candidate_selection_strategy="current_best",  # Select best performing candidate
-        max_metric_calls=20,  # Limit total evaluations (5 generations * 4 candidates = 20)
+        max_metric_calls=2,  # Minimal testing: 2 total evaluations (1 initial + 1 optimization step)
         display_progress_bar=True
     )
 
