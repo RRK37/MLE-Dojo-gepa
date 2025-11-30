@@ -93,9 +93,11 @@ class Agent:
         self._theme_cache_size = 0
         
         # Token management - reserve tokens for task desc, instructions, etc.
-        # Claude has 200K input limit, reserve significant buffer for other content
-        self.max_memory_tokens = 50000  # Conservative limit for Memory section
-        self.max_total_prompt_tokens = 180000  # Leave buffer for safety
+        # Claude has 200K input limit, must be VERY conservative
+        self.max_memory_tokens = 15000  # Strict limit for Memory section
+        self.max_learned_patterns_tokens = 3000  # Limit for learned patterns
+        self.max_data_preview_tokens = 8000  # Limit for data preview
+        self.max_total_prompt_tokens = 150000  # Leave large buffer for safety
 
     
     def _count_tokens(self, text: str) -> int:
@@ -133,13 +135,15 @@ class Agent:
         
         for node in sorted_nodes:
             # Generate summary for this node (without code to save tokens)
-            node_summary = f"Design: {node.plan}\n"
+            # Truncate plan if it's too long
+            plan_text = node.plan[:500] + "..." if len(node.plan) > 500 else node.plan
+            node_summary = f"Design: {plan_text}\n"
             
             if node.feedback is not None:
-                # Truncate feedback if it's too long
+                # Truncate feedback aggressively - it can be very long
                 feedback_str = str(node.feedback)
-                if len(feedback_str) > 500:
-                    feedback_str = feedback_str[:500] + "...[truncated]"
+                if len(feedback_str) > 200:
+                    feedback_str = feedback_str[:200] + "...[truncated]"
                 node_summary += f"Execution Feedback: {feedback_str}\n"
             
             if node.raw_score is not None:
@@ -320,6 +324,16 @@ class Agent:
         prompt_tokens = self._estimate_prompt_tokens(prompt)
         logger.info(f"plan_and_code_query: Estimated {prompt_tokens} tokens in prompt")
         
+        # Log breakdown of sections
+        if isinstance(prompt, dict):
+            for key, value in prompt.items():
+                if isinstance(value, (str, dict)):
+                    section_str = compile_prompt_to_md({key: value})
+                    section_tokens = self._count_tokens(section_str)
+                    logger.info(f"  Section '{key}': {section_tokens} tokens")
+                    if section_tokens > 30000:
+                        logger.warning(f"  ⚠️ Section '{key}' is very large: {section_tokens} tokens!")
+        
         completion_text = None
         for _ in range(retries):
             completion_text, cost = self.query_llm(
@@ -382,6 +396,13 @@ class Agent:
         if self.acfg.data_preview:
             prompt["Data Overview"] = self.data_preview
         
+        # Final token check before sending
+        estimated_tokens = self._estimate_prompt_tokens(prompt)
+        if estimated_tokens > self.max_total_prompt_tokens:
+            logger.warning(f"Draft prompt too large ({estimated_tokens} tokens), further reducing Memory...")
+            # Emergency reduction: cut Memory in half
+            prompt["Memory"] = self._generate_truncated_summary(max_tokens=self.max_memory_tokens // 2)
+        
         plan, code, assistant = self.plan_and_code_query(prompt)
         return Node(plan=plan, code=code, instruction_prompt=compile_prompt_to_md(prompt), node_type="draft", assistant=assistant)
 
@@ -403,8 +424,14 @@ class Agent:
         if learned_patterns:
             prompt.update(learned_patterns)
         
+        # Truncate code if it's exceptionally long (usually shouldn't be, but just in case)
+        code_to_show = parent_node.code
+        if len(parent_node.code) > 20000:  # ~5000 tokens
+            code_to_show = parent_node.code[:20000] + "\n\n# [Code truncated due to length...]"
+            logger.warning(f"Parent node code truncated from {len(parent_node.code)} to 20000 chars")
+        
         prompt["Previous solution"] = {
-            "Code": wrap_code(parent_node.code),
+            "Code": wrap_code(code_to_show),
         }
 
         prompt["Instructions"] |= self._prompt_resp_fmt
@@ -425,6 +452,16 @@ class Agent:
             "Memory": prompt["Memory"],
             "Instructions": prompt["Instructions"],
         })
+
+        # Final token check before sending
+        estimated_tokens = self._estimate_prompt_tokens(prompt)
+        if estimated_tokens > self.max_total_prompt_tokens:
+            logger.warning(f"Improve prompt too large ({estimated_tokens} tokens), reducing Memory and removing Learned Patterns...")
+            # Emergency reduction
+            prompt["Memory"] = self._generate_truncated_summary(max_tokens=self.max_memory_tokens // 2)
+            # Remove learned patterns if still too large
+            if "Learned Patterns" in prompt:
+                del prompt["Learned Patterns"]
 
         plan, code, assistant = self.plan_and_code_query(prompt)
         return Node(
@@ -629,7 +666,9 @@ class Agent:
         if self._theme_cache is None or current_size != self._theme_cache_size:
             # Update cache
             if current_size >= 6:
-                self._theme_cache = self._analyze_best_vs_worst()
+                full_analysis = self._analyze_best_vs_worst()
+                # Truncate to fit token budget
+                self._theme_cache = self._truncate_text_to_tokens(full_analysis, self.max_learned_patterns_tokens)
                 self._theme_cache_size = current_size
             else:
                 self._theme_cache = ""
@@ -640,10 +679,29 @@ class Agent:
         else:
             return {}
     
+    def _truncate_text_to_tokens(self, text: str, max_tokens: int) -> str:
+        """Truncate text to fit within token limit."""
+        if not text:
+            return text
+        
+        current_tokens = self._count_tokens(text)
+        if current_tokens <= max_tokens:
+            return text
+        
+        # Binary search to find the right length
+        # Rough estimate: keep proportion of characters
+        target_length = int(len(text) * (max_tokens / current_tokens) * 0.9)  # 0.9 safety factor
+        truncated = text[:target_length]
+        truncated += f"\n\n[... Truncated {current_tokens - max_tokens} excess tokens to fit context limit ...]"
+        
+        return truncated
+    
     def update_data_preview(
         self,
     ):
-        self.data_preview = data_preview.generate(self.cfg.workspace_dir)
+        full_preview = data_preview.generate(self.cfg.workspace_dir)
+        # Truncate data preview to fit token budget
+        self.data_preview = self._truncate_text_to_tokens(full_preview, self.max_data_preview_tokens)
     
     def step(self, exec_callback: ExecCallbackType):
         if not self.journal.nodes or self.data_preview is None:
