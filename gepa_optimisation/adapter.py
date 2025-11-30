@@ -159,6 +159,14 @@ class MLEDojoGEPAAdapter(GEPAAdapter):
             print(f"[Adapter] Episode {episode_idx}: Agent generated {len(agent.journal.nodes)} nodes, Steps taken: {steps}")
             
             if agent.journal.nodes:
+                # Debug: print all node scores
+                print(f"[Adapter] All nodes in journal:")
+                for i, node in enumerate(agent.journal.nodes):
+                    node_score = node.metric.value if (hasattr(node, 'metric') and node.metric) else "No metric"
+                    node_status = node.status if hasattr(node, 'status') else "No status"
+                    is_buggy = node.is_buggy if hasattr(node, 'is_buggy') else "Unknown"
+                    print(f"  Node {i}: score={node_score}, status={node_status}, buggy={is_buggy}")
+                
                 # Retrieve the best score recorded in the agent's journal
                 best_node = agent.journal.get_best_node(only_good=False)  # Get best even if buggy
                 if best_node:
