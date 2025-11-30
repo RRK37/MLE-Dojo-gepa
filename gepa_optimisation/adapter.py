@@ -507,28 +507,31 @@ REMEMBER: You MUST create submission.csv in EVERY iteration. Without it, your sc
     
     def _save_journal_data(self, journal, episode_idx: int):
         """
-        Save journal node data to JSON and CSV files for later analysis and plotting.
+        Save journal node data to cumulative JSON and CSV files for later analysis and plotting.
         
         Args:
             journal: The agent's journal object containing node history
-            episode_idx: Current episode index for file naming
+            episode_idx: Current episode index
         """
         # Create logs directory if it doesn't exist
         logs_dir = Path(self.output_dir) / "journal_logs"
         logs_dir.mkdir(parents=True, exist_ok=True)
         
-        # Generate timestamp for unique file naming
+        # Generate timestamp
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         
-        # Prepare data structures
-        json_data = {
+        # File paths for cumulative logs
+        json_file = logs_dir / "journal_history.json"
+        csv_file = logs_dir / "journal_history.csv"
+        
+        # Prepare current episode data
+        csv_rows = []
+        episode_data = {
             "competition": self.competition_name,
             "episode": episode_idx,
             "timestamp": timestamp,
             "nodes": []
         }
-        
-        csv_rows = []
         
         for i, node in enumerate(journal.nodes):
             # Extract node information
@@ -536,17 +539,16 @@ REMEMBER: You MUST create submission.csv in EVERY iteration. Without it, your sc
             node_status = str(node.status) if hasattr(node, 'status') else "UNKNOWN"
             is_buggy = bool(node.is_buggy) if hasattr(node, 'is_buggy') else False
             
-            # JSON format (detailed)
+            # JSON format
             node_data = {
                 "node_id": i,
                 "score": node_score,
                 "status": node_status,
-                "buggy": is_buggy,
-                "episode": episode_idx
+                "buggy": is_buggy
             }
-            json_data["nodes"].append(node_data)
+            episode_data["nodes"].append(node_data)
             
-            # CSV format (flat, easy for plotting)
+            # CSV format
             csv_rows.append({
                 "episode": episode_idx,
                 "node_id": i,
@@ -556,14 +558,20 @@ REMEMBER: You MUST create submission.csv in EVERY iteration. Without it, your sc
                 "timestamp": timestamp
             })
         
-        # Save JSON file
-        json_file = logs_dir / f"journal_episode_{episode_idx}_{timestamp}.json"
-        with open(json_file, 'w') as f:
-            json.dump(json_data, f, indent=2)
-        print(f"[Adapter] Saved journal to {json_file}")
+        # Append to JSON file (load existing, append, save)
+        if json_file.exists():
+            with open(json_file, 'r') as f:
+                all_episodes = json.load(f)
+        else:
+            all_episodes = {"episodes": []}
         
-        # Save/append to CSV file (append mode for continuous logging)
-        csv_file = logs_dir / f"journal_history.csv"
+        all_episodes["episodes"].append(episode_data)
+        
+        with open(json_file, 'w') as f:
+            json.dump(all_episodes, f, indent=2)
+        print(f"[Adapter] Appended episode {episode_idx} to {json_file}")
+        
+        # Append to CSV file
         file_exists = csv_file.exists()
         
         with open(csv_file, 'a', newline='') as f:
