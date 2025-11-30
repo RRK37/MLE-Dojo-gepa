@@ -45,8 +45,8 @@ def main():
             "expose_prediction": True,
             "data_preview": True,
             "code": {
-                "model_name": "gpt-4o",
-                "model_mode": "gpt",
+                "model_name": "claude-4-5-sonnet",
+                "model_mode": "claude",
                 "port": 8314,
                 "max_completion_tokens": 8192,
                 "max_prompt_tokens": 30000,
