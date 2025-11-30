@@ -42,8 +42,8 @@ async def get_status():
 
 @app.post("/prompt")
 async def post_prompt(competition: Competition):
-#some logic 
-    return 
+
+    return {"message": f"MLE Dojo {competition} is initialized"}
 
 if __name__ == "__main__":
     import uvicorn

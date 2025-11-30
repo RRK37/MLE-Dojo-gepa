@@ -62,3 +62,5 @@ google-genai
 transformers
 scikit-image
 torchtext
+fastapi
+uvicorn
