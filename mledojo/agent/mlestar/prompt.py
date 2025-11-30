@@ -27,7 +27,7 @@ Model = {{'model_name': str, 'example_code': str}}
 Return: list[Model]"""
 
     @staticmethod
-    def prompt_2_initial_solution(task_description: str, model_description: str, example_code: str) -> str:
+    def prompt_2_initial_solution(task_description: str, model_description: str, example_code: str, data_dir: str) -> str:
         """Prompt 2: Generate initial solution from model."""
         return f"""# Introduction
 - You are a Kaggle grandmaster attending a competition.
@@ -49,11 +49,11 @@ Return: list[Model]"""
 - You must use the model as described in the model description.
 - This first solution design should be relatively simple, without ensembling or hyper-parameter optimization.
 - Propose an evaluation metric that is reasonable for this task.
-- All the provided data is already prepared and available in the `./input` directory. There is no need to unzip any files.
+- All the provided data is already prepared and available in the `{data_dir}` directory. There is no need to unzip any files.
 - Do not include other models that are not directly related to the model described.
 - Use PyTorch rather than TensorFlow. Use CUDA if you need. All the necessary libraries are installed.
 - The code should implement the proposed solution and print the value of the evaluation metric computed on a hold-out validation set.
-- Only use the provided train data in the `./input` directory. Do not load test data.
+- Only use the provided train data in the `{data_dir}` directory. Do not load test data.
 - If there are more than 30,000 training samples, you must subsample to 30,000 for a faster run.
 
 # Required
@@ -65,7 +65,7 @@ Return: list[Model]"""
 - Do not use try: and except: or if else to ignore unintended behavior."""
 
     @staticmethod
-    def prompt_3_merge_solutions(task_description: str, base_code: str, reference_code: str) -> str:
+    def prompt_3_merge_solutions(task_description: str, base_code: str, reference_code: str, data_dir: str) -> str:
         """Prompt 3: Merge base and reference solutions."""
         return f"""# Introduction
 - You are a Kaggle grandmaster attending a competition.
@@ -87,7 +87,7 @@ Return: list[Model]"""
 - When integrating, ensemble the models.
 - The solution design should be relatively simple.
 - The code should implement the proposed solution and print the value of the evaluation metric computed on a hold-out validation set.
-- Only use the provided train data in the `./input` directory. Do not load test data.
+- Only use the provided train data in the `{data_dir}` directory. Do not load test data.
 - If there are more than 30,000 training samples, you must subsample to 30,000 for a faster run.
 
 # Required
@@ -255,7 +255,7 @@ Return: list[Refine_Plan]"""
 - Plan should not modify the original solutions too much since execution error can occur."""
 
     @staticmethod
-    def prompt_10_implement_ensemble(solutions: List[str], plan: str) -> str:
+    def prompt_10_implement_ensemble(solutions: List[str], plan: str, data_dir: str) -> str:
         """Prompt 10: Implement ensemble."""
         solutions_text = ""
         for i, solution in enumerate(solutions):
@@ -273,7 +273,7 @@ Return: list[Refine_Plan]"""
 # Your task
 - Implement the ensemble plan with the provided solutions.
 - Unless mentioned in the ensemble plan, do not modify the original Python Solutions too much."
-- All the provided data (except previous submissions; do not load submissions) is already prepared and available in the `./input` directory. There is no need to unzip any files.
+- All the provided data (except previous submissions; do not load submissions) is already prepared and available in the `{data_dir}` directory. There is no need to unzip any files.
 - The code should implement the proposed solution and print the value of the evaluation metric computed on a hold-out validation set.
 
 # Response format required
@@ -285,7 +285,7 @@ Return: list[Refine_Plan]"""
 - The code should be a single-file Python program that is self-contained and can be executed as-is."""
 
     @staticmethod
-    def prompt_11_debug(code: str, bug: str) -> str:
+    def prompt_11_debug(code: str, bug: str, data_dir: str) -> str:
         """Prompt 11: Debug code with error."""
         return f"""# Code with an error:
 {code}
@@ -298,7 +298,7 @@ Return: list[Refine_Plan]"""
 - Do not remove subsampling if exists.
 - Provide the improved, self-contained Python script again.
 - There should be no additional headings or text in your response.
-- All the provided input data is stored in "./input" directory.
+- All the provided input data is stored in "{data_dir}" directory.
 - Remember to print a line in the code with 'Final Validation Performance: {{final_validation_score}}' so we can parse performance.
 - The code should be a single-file python program that is self-contained and can be executed as-is.
 - Your response should only contain a single code block.

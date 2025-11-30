@@ -323,7 +323,8 @@ class MLEStarAgent:
         prompt = prompts.prompt_2_initial_solution(
             self.task_desc,
             model_desc,
-            example_code
+            example_code,
+            self.data_dir
         )
         
         response = self._safe_query_llm(prompt)
@@ -335,7 +336,8 @@ class MLEStarAgent:
         prompt = prompts.prompt_3_merge_solutions(
             self.task_desc,
             base_code,
-            reference_code
+            reference_code,
+            self.data_dir
         )
         
         response = self._safe_query_llm(prompt)
@@ -347,7 +349,8 @@ class MLEStarAgent:
         prompt = prompts.prompt_2_initial_solution(
             self.task_desc,
             "Default baseline model",
-            "# Simple baseline implementation"
+            "# Simple baseline implementation",
+            self.data_dir
         )
         response = self._safe_query_llm(prompt)
         code = extract_code(response)
@@ -561,7 +564,7 @@ class MLEStarAgent:
     
     def _implement_ensemble(self, solutions: List[str], plan: str) -> str:
         """A_ensembler: Implement ensemble (Prompt 10)."""
-        prompt = prompts.prompt_10_implement_ensemble(solutions, plan)
+        prompt = prompts.prompt_10_implement_ensemble(solutions, plan, self.data_dir)
         response = self._safe_query_llm(prompt)
         code = extract_code(response)
         return code if code else solutions[0]
@@ -570,7 +573,7 @@ class MLEStarAgent:
     
     def _debug_code(self, code: str, error: str) -> Optional[str]:
         """Debug code with error (Prompt 11)."""
-        prompt = prompts.prompt_11_debug(code, error)
+        prompt = prompts.prompt_11_debug(code, error, self.data_dir)
         response = self._safe_query_llm(prompt)
         fixed_code = extract_code(response)
         return fixed_code if fixed_code else None
