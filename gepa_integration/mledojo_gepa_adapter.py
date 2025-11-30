@@ -262,7 +262,7 @@ def _prepare_config(self, comp_config: CompetitionConfig) -> Dict[str, Any]:
         journal: Journal,
         agent: Agent,
         final_score: float
-    ) -> ExecutionTrajectory:
+        ) -> ExecutionTrajectory:
         
         failure_patterns = []
         for node in journal.buggy_nodes:
