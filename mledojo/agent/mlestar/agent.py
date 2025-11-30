@@ -129,13 +129,30 @@ class MLEStarAgent:
         user_message = compile_prompt_to_md(user_message) if user_message else None
         messages = opt_messages_to_list(system_message, user_message)
         
-        response = self.model_client.chat_completion(messages, self.model_settings)
-        cost = 0.0  # TODO: Calculate actual cost
+        # chat_completion returns (response_text, cost) tuple
+        result = self.model_client.chat_completion(messages, self.model_settings)
+        
+        # Safely unpack the tuple
+        if isinstance(result, tuple) and len(result) >= 2:
+            response, cost = result[0], result[1]
+        elif isinstance(result, tuple) and len(result) == 1:
+            response, cost = result[0], 0.0
+        else:
+            logger.error(f"chat_completion returned unexpected type: {type(result)}, value: {result}")
+            response = str(result) if result else ""
+            cost = 0.0
+        
         self.total_cost += cost
         
-        # Ensure response is a string
+        # Ensure response is a string (handle nested tuples and edge cases)
+        if isinstance(response, tuple):
+            logger.debug(f"query_llm: response is nested tuple, extracting first element")
+            response = response[0] if len(response) > 0 else ""
+        
         if not isinstance(response, str):
-            logger.warning(f"query_llm received non-string response: {type(response)}, converting to string")
+            # Only log as warning if it's unexpected (not None)
+            if response is not None:
+                logger.debug(f"query_llm: converting non-string response {type(response)} to string")
             response = str(response) if response else ""
         
         return response, cost
