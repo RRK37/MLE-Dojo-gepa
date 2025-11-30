@@ -9,7 +9,6 @@ import os
 import logging
 import json
 import re
-import asyncio
 import tiktoken
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from dataclasses import dataclass
@@ -82,6 +81,11 @@ class MLEStarAgent:
         self.ensemble_solutions: List[str] = []
         self.ensemble_plans: List[Tuple[str, float]] = []
         
+        # Tracking for graphs and errors
+        self.reward_history: List[Dict] = []  # [{"timestep": int, "reward": float, "phase": str, "iteration": int, "error": Optional[str]}]
+        self.error_history: List[Dict] = []  # [{"timestep": int, "phase": str, "error": str, "traceback": str}]
+        self.timestep = 0
+        
         # LLM settings
         self.llm_config = self.acfg.code
         self.tokenizer = tiktoken.encoding_for_model('gpt-4')
@@ -129,24 +133,22 @@ class MLEStarAgent:
         self.total_cost += cost
         return response, cost
     
-    async def search_web(self, query: str) -> str:
-        """Search web using Perplexity API."""
+    def search_web(self, query: str) -> str:
+        """Search web using Perplexity API (synchronous for Jupyter compatibility)."""
         if not self.web_client:
             logger.warning("Web search not available, returning empty result")
             return ""
         
         try:
-            response = await asyncio.get_event_loop().run_in_executor(
-                None,
-                lambda: self.web_client.chat.completions.create(
-                    model="sonar-medium-online",
-                    messages=[
-                        {"role": "system", "content": "You are a helpful assistant that performs web searches."},
-                        {"role": "user", "content": query}
-                    ],
-                    max_tokens=2000,
-                    temperature=0.7,
-                )
+            # Use synchronous call instead of asyncio for Jupyter compatibility
+            response = self.web_client.chat.completions.create(
+                model="sonar-medium-online",
+                messages=[
+                    {"role": "system", "content": "You are a helpful assistant that performs web searches."},
+                    {"role": "user", "content": query}
+                ],
+                max_tokens=2000,
+                temperature=0.7,
             )
             if response and response.choices:
                 return response.choices[0].message.content or ""
@@ -218,31 +220,36 @@ class MLEStarAgent:
         self.best_solution = s_0
         self.best_score = h_best
         
-        # Try merging others
+        # Try merging others (Algorithm 1, lines 8-17)
         for i in range(1, len(self.initial_solutions)):
             s_candidate_code, s_candidate_score = self.initial_solutions[i]
             merged_code = self._merge_solutions(s_0, s_candidate_code)
-            if merged_code:
-                result = exec_callback(merged_code)
-                h_candidate = self._extract_score(result)
-                
-                if (self.higher_is_better and h_candidate >= h_best) or \
-                   (not self.higher_is_better and h_candidate <= h_best):
-                    s_0 = merged_code
-                    h_best = h_candidate
-                    self.best_solution = s_0
-                    self.best_score = h_best
-                    logger.info(f"Merged solution {i+1}, new score: {h_best}")
+            if not merged_code:
+                logger.info(f"Failed to merge solution {i+1}, skipping")
+                continue
+            
+            result = exec_callback(merged_code)
+            h_candidate = self._extract_score(result)
+            
+            # Algorithm 1, line 11: if h(s_candidate) ≥ h_best then
+            if (self.higher_is_better and h_candidate >= h_best) or \
+               (not self.higher_is_better and h_candidate <= h_best):
+                s_0 = merged_code
+                h_best = h_candidate
+                self.best_solution = s_0
+                self.best_score = h_best
+                logger.info(f"Merged solution {i+1}, new score: {h_best}")
             else:
-                    logger.info(f"Merged solution {i+1} did not improve, stopping merge")
-                    break
+                # Algorithm 1, line 14-15: else break
+                logger.info(f"Merged solution {i+1} did not improve (score: {h_candidate} vs best: {h_best}), stopping merge")
+                break
         
         return self.best_solution
     
     def _retrieve_models(self, M: int) -> List[Dict]:
         """A_retriever: Retrieve M models via web search (Prompt 1)."""
         query = f"Kaggle competition winning solutions for: {self.task_desc[:200]}"
-        search_result = asyncio.run(self.search_web(query))
+        search_result = self.search_web(query)  # Now synchronous
         
         prompt = prompts.prompt_1_model_retrieval(self.task_desc, M)
         response, _ = self.query_llm(prompt)
@@ -464,11 +471,11 @@ class MLEStarAgent:
         result = exec_callback(s_ens_0)
         h_ens_0 = self._extract_score(result)
         
-        best_ensemble = s_ens_0
-        best_score = h_ens_0
+        # Track all ensembles for argmax selection (Algorithm 3, line 9)
+        ensemble_results = [(s_ens_0, h_ens_0, 0)]  # (solution, score, iteration)
         self.ensemble_plans.append((ensemble_plan, h_ens_0))
         
-        # Steps 4-8: Alternative ensemble plans
+        # Steps 4-8: Alternative ensemble plans (Algorithm 3, lines 4-8)
         for r in range(1, R):
             ensemble_plan_r = self._suggest_ensemble_plan(solutions, self.ensemble_plans)
             if not ensemble_plan_r:
@@ -478,13 +485,17 @@ class MLEStarAgent:
             result = exec_callback(s_ens_r)
             h_ens_r = self._extract_score(result)
             
-            if (self.higher_is_better and h_ens_r >= best_score) or \
-               (not self.higher_is_better and h_ens_r <= best_score):
-                best_ensemble = s_ens_r
-                best_score = h_ens_r
-            
+            ensemble_results.append((s_ens_r, h_ens_r, r))
             self.ensemble_plans.append((ensemble_plan_r, h_ens_r))
         
+        # Algorithm 3, lines 9-10: r* = argmax, s_ens* = s_ens^{r*}
+        if self.higher_is_better:
+            best_idx = max(range(len(ensemble_results)), key=lambda i: ensemble_results[i][1])
+        else:
+            best_idx = min(range(len(ensemble_results)), key=lambda i: ensemble_results[i][1])
+        
+        best_ensemble, best_score, best_r = ensemble_results[best_idx]
+        logger.info(f"Best ensemble from iteration {best_r} with score: {best_score}")
         return best_ensemble
     
     def _suggest_ensemble_plan(self, solutions: List[str], prev_plans: List[Tuple[str, float]]) -> Optional[str]:
@@ -576,33 +587,61 @@ class MLEStarAgent:
         if not hasattr(self, '_phase'):
             self._phase = 'initial'
         
+        # Optional print statements (like AIDE) - prints are always shown, just like AIDE
+        # AIDE doesn't have verbose flag, prints are always shown
+        if self._phase == 'initial':
+            print("Phase: Algorithm 1 - Initial Solution (Search → Merge)")
+        elif self._phase == 'refinement':
+            print("Phase: Algorithm 2 - Targeted Refinement (Ablation → Refine)")
+        elif self._phase == 'ensemble':
+            print("Phase: Algorithm 3 - Ensemble")
+        elif self._phase == 'validation':
+            print("Phase: Validation & Debugging")
+        elif self._phase == 'done':
+            print("MLE-STAR workflow completed")
+        
         if self._phase == 'initial':
             logger.info("Phase: Algorithm 1 - Initial Solution")
-            solution = self.algorithm_1_initial_solution(exec_callback)
-            node = Node(
-                code=solution,
-                plan="Initial solution from Algorithm 1",
-                node_type="draft",
-                instruction_prompt="Algorithm 1: Search → Initial Solution"
-            )
-            result = exec_callback(solution)
-            self.parse_exec_result(node, result)
-            self.journal.append(node)
-            self._phase = 'refinement'
+            try:
+                solution = self.algorithm_1_initial_solution(exec_callback)
+                node = Node(
+                    code=solution,
+                    plan="Initial solution from Algorithm 1",
+                    node_type="draft",
+                    instruction_prompt="Algorithm 1: Search → Initial Solution"
+                )
+                result = exec_callback(solution)
+                reward = self._extract_score(result)
+                self._record_reward(reward, 'initial', iteration=0)
+                self.parse_exec_result(node, result)
+                self.journal.append(node)
+                self._phase = 'refinement'
+            except Exception as e:
+                self._record_error('initial', str(e))
+                logger.error(f"Error in initial phase: {str(e)}", exc_info=True)
+                raise
             
         elif self._phase == 'refinement':
             logger.info("Phase: Algorithm 2 - Targeted Refinement")
             if self.best_solution:
-                solution = self.algorithm_2_refinement(self.best_solution, exec_callback)
-                node = Node(
-                    code=solution,
-                    plan="Refined solution from Algorithm 2",
-                    node_type="improve",
-                    instruction_prompt="Algorithm 2: Targeted Refinement"
-                )
-                result = exec_callback(solution)
-                self.parse_exec_result(node, result)
-                self.journal.append(node)
+                try:
+                    refinement_iter = len(self.ablation_history)
+                    solution = self.algorithm_2_refinement(self.best_solution, exec_callback)
+                    node = Node(
+                        code=solution,
+                        plan="Refined solution from Algorithm 2",
+                        node_type="improve",
+                        instruction_prompt="Algorithm 2: Targeted Refinement"
+                    )
+                    result = exec_callback(solution)
+                    reward = self._extract_score(result)
+                    self._record_reward(reward, 'refinement', iteration=refinement_iter)
+                    self.parse_exec_result(node, result)
+                    self.journal.append(node)
+                except Exception as e:
+                    self._record_error('refinement', str(e))
+                    logger.error(f"Error in refinement phase: {str(e)}", exc_info=True)
+                    raise
             self._phase = 'ensemble'
             
         elif self._phase == 'ensemble':
@@ -612,36 +651,207 @@ class MLEStarAgent:
                 solutions.append(self.best_solution)
             
             if len(solutions) >= 2:
-                solution = self.algorithm_3_ensemble(solutions, exec_callback)
-                node = Node(
-                    code=solution,
-                    plan="Ensemble solution from Algorithm 3",
-                    node_type="improve",
-                    instruction_prompt="Algorithm 3: Ensemble"
-                )
-                result = exec_callback(solution)
-                self.parse_exec_result(node, result)
-                self.journal.append(node)
+                try:
+                    ensemble_iter = len(self.ensemble_plans)
+                    solution = self.algorithm_3_ensemble(solutions, exec_callback)
+                    node = Node(
+                        code=solution,
+                        plan="Ensemble solution from Algorithm 3",
+                        node_type="improve",
+                        instruction_prompt="Algorithm 3: Ensemble"
+                    )
+                    result = exec_callback(solution)
+                    reward = self._extract_score(result)
+                    self._record_reward(reward, 'ensemble', iteration=ensemble_iter)
+                    self.parse_exec_result(node, result)
+                    self.journal.append(node)
+                except Exception as e:
+                    self._record_error('ensemble', str(e))
+                    logger.error(f"Error in ensemble phase: {str(e)}", exc_info=True)
+                    raise
             self._phase = 'validation'
             
         elif self._phase == 'validation':
             logger.info("Phase: Validation & Debugging")
             if self.best_solution:
-                # Check for data leakage
-                has_leakage, _ = self._check_data_leakage(self.best_solution)
-                if has_leakage:
-                    fixed = self._fix_data_leakage(self.best_solution)
-                    if fixed:
-                        self.best_solution = fixed
-                
-                # Check data usage
-                improved = self._check_data_usage(self.best_solution)
-                if improved:
-                    self.best_solution = improved
+                try:
+                    # Check for data leakage
+                    has_leakage, _ = self._check_data_leakage(self.best_solution)
+                    if has_leakage:
+                        fixed = self._fix_data_leakage(self.best_solution)
+                        if fixed:
+                            self.best_solution = fixed
+                    
+                    # Check data usage
+                    improved = self._check_data_usage(self.best_solution)
+                    if improved:
+                        self.best_solution = improved
+                    
+                    # Record final reward
+                    if self.best_solution:
+                        result = exec_callback(self.best_solution)
+                        reward = self._extract_score(result)
+                        self._record_reward(reward, 'validation', iteration=0)
+                except Exception as e:
+                    self._record_error('validation', str(e))
+                    logger.error(f"Error in validation phase: {str(e)}", exc_info=True)
             self._phase = 'done'
         
         else:
             logger.info("MLE-STAR workflow completed")
+    
+    def _record_reward(self, reward: float, phase: str, iteration: int):
+        """Record reward for graphing."""
+        self.timestep += 1
+        self.reward_history.append({
+            "timestep": self.timestep,
+            "reward": reward,
+            "phase": phase,
+            "iteration": iteration,
+            "error": None
+        })
+    
+    def _record_error(self, phase: str, error: str, traceback_str: Optional[str] = None):
+        """Record error for tracking."""
+        import traceback as tb
+        if traceback_str is None:
+            traceback_str = ''.join(tb.format_exc())
+        
+        self.timestep += 1
+        self.error_history.append({
+            "timestep": self.timestep,
+            "phase": phase,
+            "error": error,
+            "traceback": traceback_str
+        })
+        
+        # Also record in reward history with error flag
+        self.reward_history.append({
+            "timestep": self.timestep,
+            "reward": -float('inf') if self.higher_is_better else float('inf'),
+            "phase": phase,
+            "iteration": 0,
+            "error": error
+        })
+    
+    def save_graphs(self, output_dir: str):
+        """Save reward graphs with phase and iteration information."""
+        try:
+            import matplotlib.pyplot as plt
+            import matplotlib.patches as mpatches
+            from pathlib import Path
+            
+            output_path = Path(output_dir)
+            output_path.mkdir(parents=True, exist_ok=True)
+            
+            if not self.reward_history:
+                logger.warning("No reward history to plot")
+                return
+            
+            # Prepare data
+            timesteps = [r["timestep"] for r in self.reward_history]
+            rewards = [r["reward"] for r in self.reward_history]
+            phases = [r["phase"] for r in self.reward_history]
+            iterations = [r["iteration"] for r in self.reward_history]
+            has_errors = [r["error"] is not None for r in self.reward_history]
+            
+            # Create figure with subplots
+            fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 10))
+            
+            # Plot 1: Reward over timestep with phase colors
+            phase_colors = {
+                'initial': '#e3f2fd',
+                'refinement': '#fff3e0',
+                'ensemble': '#f3e5f5',
+                'validation': '#e0f2f1',
+                'done': '#ffebee'
+            }
+            
+            # Plot rewards by phase
+            for phase in set(phases):
+                phase_mask = [p == phase for p in phases]
+                phase_timesteps = [t for t, m in zip(timesteps, phase_mask) if m]
+                phase_rewards = [r for r, m in zip(rewards, phase_mask) if m]
+                ax1.scatter(phase_timesteps, phase_rewards, 
+                           c=phase_colors.get(phase, '#cccccc'), 
+                           label=phase, s=100, alpha=0.7, edgecolors='black', linewidths=1)
+            
+            # Plot line connecting rewards
+            ax1.plot(timesteps, rewards, 'k-', alpha=0.3, linewidth=1)
+            
+            # Mark errors
+            error_timesteps = [t for t, e in zip(timesteps, has_errors) if e]
+            error_rewards = [r for r, e in zip(rewards, has_errors) if e]
+            if error_timesteps:
+                ax1.scatter(error_timesteps, error_rewards, 
+                           c='red', marker='x', s=200, linewidths=3, 
+                           label='Error', zorder=10)
+            
+            ax1.set_xlabel('Timestep', fontsize=12)
+            ax1.set_ylabel('Reward', fontsize=12)
+            ax1.set_title('MLE-STAR: Reward per Timestep by Phase', fontsize=14, fontweight='bold')
+            ax1.legend(loc='best', fontsize=10)
+            ax1.grid(True, alpha=0.3)
+            
+            # Plot 2: Reward by iteration within each phase
+            phase_iter_data = {}
+            for r in self.reward_history:
+                phase = r["phase"]
+                iteration = r["iteration"]
+                reward = r["reward"]
+                if phase not in phase_iter_data:
+                    phase_iter_data[phase] = {}
+                if iteration not in phase_iter_data[phase]:
+                    phase_iter_data[phase][iteration] = []
+                phase_iter_data[phase][iteration].append(reward)
+            
+            # Plot bars for each phase-iteration combination
+            x_pos = 0
+            x_labels = []
+            x_positions = []
+            bar_colors = []
+            bar_heights = []
+            
+            for phase in ['initial', 'refinement', 'ensemble', 'validation']:
+                if phase in phase_iter_data:
+                    for iteration in sorted(phase_iter_data[phase].keys()):
+                        avg_reward = sum(phase_iter_data[phase][iteration]) / len(phase_iter_data[phase][iteration])
+                        x_labels.append(f"{phase}\niter{iteration}")
+                        x_positions.append(x_pos)
+                        bar_heights.append(avg_reward)
+                        bar_colors.append(phase_colors.get(phase, '#cccccc'))
+                        x_pos += 1
+            
+            if x_positions:
+                bars = ax2.bar(x_positions, bar_heights, color=bar_colors, 
+                              edgecolor='black', linewidth=1, alpha=0.7)
+                ax2.set_xticks(x_positions)
+                ax2.set_xticklabels(x_labels, rotation=45, ha='right', fontsize=9)
+                ax2.set_ylabel('Average Reward', fontsize=12)
+                ax2.set_title('MLE-STAR: Average Reward by Phase and Iteration', fontsize=14, fontweight='bold')
+                ax2.grid(True, alpha=0.3, axis='y')
+            
+            plt.tight_layout()
+            
+            # Save figure
+            graph_path = output_path / "mlestar_rewards.png"
+            plt.savefig(graph_path, dpi=300, bbox_inches='tight')
+            plt.close()
+            
+            logger.info(f"Saved reward graph to {graph_path}")
+            
+            # Save error log if there are errors
+            if self.error_history:
+                error_path = output_path / "mlestar_errors.json"
+                import json
+                with open(error_path, 'w') as f:
+                    json.dump(self.error_history, f, indent=2)
+                logger.info(f"Saved error log to {error_path}")
+            
+        except ImportError:
+            logger.warning("matplotlib not available, skipping graph generation")
+        except Exception as e:
+            logger.error(f"Failed to save graphs: {str(e)}", exc_info=True)
     
     def parse_exec_result(self, node: Node, exec_result: Dict):
         """Parse execution result and update node."""

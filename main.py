@@ -305,13 +305,23 @@ def run_mlestar_agent(
             # Transform the result and reward into the expected format for the agent
             return obs
         
-        agent.step(exec_callback=exec_callback)
-        save_run(cfg, journal)
+        try:
+            agent.step(exec_callback=exec_callback)
+            save_run(cfg, journal)
+        except Exception as e:
+            logger.error(f"Error in step {step_num}: {str(e)}", exc_info=True)
+            # Continue to next step even if one fails
         
         # Check if workflow is done
         if hasattr(agent, '_phase') and agent._phase == 'done':
             logger.info("MLE-STAR workflow completed")
             break
+    
+    # Save graphs and error logs
+    try:
+        agent.save_graphs(str(cfg.log_dir))
+    except Exception as e:
+        logger.error(f"Failed to save graphs: {str(e)}", exc_info=True)
     
     best_node = journal.get_best_node(only_good=False)
     logger.info(f"MLE-STAR agent run finished. Best solution metric: {best_node.metric.value}")
