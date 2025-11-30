@@ -330,7 +330,8 @@ class MLEStarAgent:
             model_desc,
             example_code,
             self.data_dir,
-            available_packages
+            available_packages,
+            self.data_preview or ""
         )
         
         response = self._safe_query_llm(prompt)
@@ -345,7 +346,8 @@ class MLEStarAgent:
             base_code,
             reference_code,
             self.data_dir,
-            available_packages
+            available_packages,
+            self.data_preview or ""
         )
         
         response = self._safe_query_llm(prompt)
