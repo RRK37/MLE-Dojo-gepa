@@ -50,18 +50,11 @@ Return: list[Model]"""
 - You must use the model as described in the model description.
 - This first solution design should be relatively simple, without ensembling or hyper-parameter optimization.
 - Propose an evaluation metric that is reasonable for this task.
-- **CRITICAL: Data Loading Instructions:**
-  - **Code runs from /tmp/ directory, NOT from the workspace**
-  - **You MUST use the absolute path: `{data_dir}`**
-  - **First, check what files exist: `import os; files = os.listdir('{data_dir}'); print('Available files:', files)`**
-  - **Then load the training data file (e.g., `train.csv`, `train.parquet`, or similar)**
-  - **Example: `train_data = pd.read_csv('{data_dir}/train.csv')` or `pd.read_parquet('{data_dir}/train.parquet')`**
-  - **DO NOT use relative paths like `./input/train.csv` - they will fail!**
-  - **Always verify the file exists before loading: `if os.path.exists('{data_dir}/train.csv'): ...`**
+- The data is already prepared and available in the `./input` directory. There is no need to unzip any files.
 - Do not include other models that are not directly related to the model described.
 - {available_packages}
 - The code should implement the proposed solution and print the value of the evaluation metric computed on a hold-out validation set.
-- Only use the provided train data from `{data_dir}`. Do not load test data.
+- Only use the provided train data. Do not load test data.
 - If there are more than 30,000 training samples, you must subsample to 30,000 for a faster run.
 
 # Required
@@ -94,17 +87,10 @@ Return: list[Model]"""
 - When integrating, try to keep code with similar functionality in the same place (e.g., all preprocessing should be done and then all training).
 - When integrating, ensemble the models.
 - The solution design should be relatively simple.
-- **CRITICAL: Data Loading Instructions:**
-  - **Code runs from /tmp/ directory, NOT from the workspace**
-  - **You MUST use the absolute path: `{data_dir}`**
-  - **First, check what files exist: `import os; files = os.listdir('{data_dir}'); print('Available files:', files)`**
-  - **Then load the training data file (e.g., `train.csv`, `train.parquet`, or similar)**
-  - **Example: `train_data = pd.read_csv('{data_dir}/train.csv')` or `pd.read_parquet('{data_dir}/train.parquet')`**
-  - **DO NOT use relative paths like `./input/train.csv` - they will fail!**
-  - **Always verify the file exists before loading: `if os.path.exists('{data_dir}/train.csv'): ...`**
+- The data is already prepared and available in the `./input` directory. There is no need to unzip any files.
 - {available_packages}
 - The code should implement the proposed solution and print the value of the evaluation metric computed on a hold-out validation set.
-- Only use the provided train data from `{data_dir}`. Do not load test data.
+- Only use the provided train data. Do not load test data.
 - If there are more than 30,000 training samples, you must subsample to 30,000 for a faster run.
 
 # Required
@@ -291,15 +277,9 @@ Return: list[Refine_Plan]"""
 
 # Your task
 - Implement the ensemble plan with the provided solutions.
-- Unless mentioned in the ensemble plan, do not modify the original Python Solutions too much."
-- **CRITICAL: Data Loading Instructions:**
-  - **Code runs from /tmp/ directory, NOT from the workspace**
-  - **You MUST use the absolute path: `{data_dir}`**
-  - **First, check what files exist: `import os; files = os.listdir('{data_dir}'); print('Available files:', files)`**
-  - **Then load the training data file (e.g., `train.csv`, `train.parquet`, or similar)**
-  - **Example: `train_data = pd.read_csv('{data_dir}/train.csv')` or `pd.read_parquet('{data_dir}/train.parquet')`**
-  - **DO NOT use relative paths like `./input/train.csv` - they will fail!**
-  - All the provided data (except previous submissions; do not load submissions) is already prepared and available in `{data_dir}`.
+- Unless mentioned in the ensemble plan, do not modify the original Python Solutions too much.
+- The data is already prepared and available in the `./input` directory. There is no need to unzip any files.
+- {available_packages}
 - The code should implement the proposed solution and print the value of the evaluation metric computed on a hold-out validation set.
 
 # Response format required
@@ -336,25 +316,9 @@ Return: list[Refine_Plan]"""
 - Do not repeat fixes that were already attempted (see previous debug attempts above).
 - Do not remove subsampling if exists.
 - Provide the improved, self-contained Python script again.
-- **CRITICAL: Data Loading Instructions:**
-  - **Code runs from /tmp/ directory, NOT from the workspace**
-  - **You MUST use the absolute path: `{data_dir}`**
-  - **First, check what files exist: `import os; files = os.listdir('{data_dir}'); print('Available files:', files)`**
-  - **Then load the training data file (e.g., `train.csv`, `train.parquet`, or similar)**
-  - **Example: `train_data = pd.read_csv('{data_dir}/train.csv')` or `pd.read_parquet('{data_dir}/train.parquet')`**
-  - **DO NOT use relative paths like `./input/train.csv` - they will fail!**
-  - **Always verify the file exists before loading: `if os.path.exists('{data_dir}/train.csv'): ...`**
+- The data is already prepared and available in the `./input` directory. There is no need to unzip any files.
 - {available_packages}
 - There should be no additional headings or text in your response.
-- All the provided input data is stored in `{data_dir}` directory.
-- **CRITICAL: Data Loading Instructions:**
-  - **Code runs from /tmp/ directory, NOT from the workspace**
-  - **You MUST use the absolute path: `{data_dir}`**
-  - **First, check what files exist: `import os; files = os.listdir('{data_dir}'); print('Available files:', files)`**
-  - **Then load the training data file (e.g., `train.csv`, `train.parquet`, or similar)**
-  - **Example: `train_data = pd.read_csv('{data_dir}/train.csv')` or `pd.read_parquet('{data_dir}/train.parquet')`**
-  - **DO NOT use relative paths like `./input/train.csv` - they will fail!**
-  - **Always verify the file exists before loading: `if os.path.exists('{data_dir}/train.csv'): ...`**
 - Remember to print a line in the code with 'Final Validation Performance: {{final_validation_score}}' so we can parse performance.
 - The code should be a single-file python program that is self-contained and can be executed as-is.
 - Your response should only contain a single code block.

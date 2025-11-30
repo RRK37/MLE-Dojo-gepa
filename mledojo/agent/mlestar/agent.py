@@ -325,45 +325,15 @@ class MLEStarAgent:
         model_desc = model.get("model_name", "")
         example_code = model.get("example_code", "")
         
-        # Debug: Check data directory and files
-        logger.info("=" * 80)
-        logger.info("🔍 DATA DIRECTORY DEBUG (prompt_2_initial_solution):")
-        logger.info("=" * 80)
-        logger.info(f"  self.data_dir (absolute): {self.data_dir}")
-        logger.info(f"  Data dir exists: {os.path.exists(self.data_dir)}")
-        if os.path.exists(self.data_dir):
-            try:
-                import glob
-                all_files = os.listdir(self.data_dir)
-                csv_files = glob.glob(os.path.join(self.data_dir, "*.csv"))
-                parquet_files = glob.glob(os.path.join(self.data_dir, "*.parquet"))
-                logger.info(f"  Total files in data_dir: {len(all_files)}")
-                logger.info(f"  CSV files: {len(csv_files)}")
-                for f in csv_files[:5]:
-                    logger.info(f"    - {os.path.basename(f)}")
-                logger.info(f"  Parquet files: {len(parquet_files)}")
-                for f in parquet_files[:5]:
-                    logger.info(f"    - {os.path.basename(f)}")
-                # Show first few files
-                logger.info(f"  First 10 files/dirs:")
-                for f in sorted(all_files)[:10]:
-                    logger.info(f"    - {f}")
-            except Exception as e:
-                logger.warning(f"  Could not list files: {e}")
-        else:
-            logger.error(f"  ⚠️ DATA DIRECTORY DOES NOT EXIST: {self.data_dir}")
-        logger.info(f"  Code will run from: /tmp/ (temporary directory)")
-        logger.info(f"  Prompt will instruct: Use absolute path '{self.data_dir}' or find data files")
-        logger.info("=" * 80)
-        
         available_packages = self._get_available_packages()
+        data_preview_text = self.data_preview if (self.acfg.data_preview and self.data_preview) else ""
         prompt = prompts.prompt_2_initial_solution(
             self.task_desc,
             model_desc,
             example_code,
             self.data_dir,
             available_packages,
-            self.data_preview or ""
+            data_preview_text
         )
         
         response = self._safe_query_llm(prompt)
@@ -698,52 +668,18 @@ class MLEStarAgent:
         # Get available packages
         available_packages = self._get_available_packages()
         
-        # Build enhanced prompt with ALL context (like AIDE)
+        # Query LLM
+        logger.info("🤖 Querying LLM for fix...")
+        data_preview_text = self.data_preview if (self.acfg.data_preview and self.data_preview) else ""
         prompt = prompts.prompt_11_debug(
             code=code,
             bug=error_info,
             data_dir=self.data_dir,
             task_desc=self.task_desc,
-            data_preview=self.data_preview,
+            data_preview=data_preview_text,
             available_packages=available_packages,
             bug_history=relevant_bug_history
         )
-        
-        # Debug: Check data directory before debugging
-        logger.info("🔍 DATA DIRECTORY DEBUG (in _debug_code):")
-        logger.info(f"  self.data_dir (absolute): {self.data_dir}")
-        logger.info(f"  Data dir exists: {os.path.exists(self.data_dir)}")
-        if os.path.exists(self.data_dir):
-            try:
-                import glob
-                csv_files = glob.glob(os.path.join(self.data_dir, "*.csv"))
-                parquet_files = glob.glob(os.path.join(self.data_dir, "*.parquet"))
-                logger.info(f"  CSV files found: {len(csv_files)}")
-                for f in csv_files[:5]:
-                    logger.info(f"    - {os.path.basename(f)}")
-                logger.info(f"  Parquet files found: {len(parquet_files)}")
-                for f in parquet_files[:5]:
-                    logger.info(f"    - {os.path.basename(f)}")
-            except Exception as e:
-                logger.warning(f"  Could not search for data files: {e}")
-        else:
-            logger.error(f"  ⚠️ DATA DIRECTORY DOES NOT EXIST: {self.data_dir}")
-        logger.info(f"  Code runs from: /tmp/ (temporary directory)")
-        logger.info(f"  Prompt will instruct: Use absolute path '{self.data_dir}'")
-        logger.info("-" * 80)
-        
-        # Log what we're asking the LLM to do
-        logger.info("📝 PROMPT CONTEXT PASSED TO LLM:")
-        logger.info(f"  - Task description: {'Yes' if self.task_desc else 'No'} ({len(self.task_desc) if self.task_desc else 0} chars)")
-        logger.info(f"  - Data preview: {'Yes' if self.data_preview else 'No'} ({len(self.data_preview) if self.data_preview else 0} chars)")
-        logger.info(f"  - Full execution feedback: {'Yes' if full_feedback else 'No'} ({len(full_feedback)} chars)")
-        logger.info(f"  - Bug history: {len(relevant_bug_history)} entries")
-        logger.info(f"  - Available packages: Included")
-        logger.info(f"  - Data directory path: {self.data_dir}")
-        logger.info("-" * 80)
-        
-        # Query LLM
-        logger.info("🤖 Querying LLM for fix...")
         response = self._safe_query_llm(prompt)
         fixed_code = extract_code(response)
         

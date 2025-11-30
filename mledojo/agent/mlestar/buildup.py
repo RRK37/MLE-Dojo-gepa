@@ -2,7 +2,11 @@
 Setup module for MLE-STAR Agent.
 
 This module provides functions to set up and configure the MLE-STAR Agent
-for Kaggle competitions, following the AIDE pattern for MLE-Dojo integration.
+for Kaggle competitions. It handles loading configurations, preparing
+workspaces, and initializing the agent with appropriate parameters.
+
+The module is designed to work with the main.py script and integrates
+with the MLE-Dojo framework for running AI agents on Kaggle competitions.
 """
 
 import os
@@ -19,11 +23,12 @@ from mledojo.agent.aide.utils.config import (
 )
 from mledojo.utils import get_metric
 
+from rich.status import Status
+
 logger = logging.getLogger("mlestar_setup")
 
-
 def setup_mlestar_agent(
-    config: Dict[str, Any],
+    config: Dict[str, Any], 
 ) -> Tuple[MLEStarAgent, Journal, Any]:
     """
     Set up an MLE-STAR Agent based on configuration.
@@ -41,7 +46,7 @@ def setup_mlestar_agent(
             - Journal for tracking agent progress
             - Configuration object for the agent
     """
-    # Load and prepare AIDE-style config (for workspace management)
+    # Load and prepare AIDE config
     _cfg = _load_cfg(use_cli_args=False)
     data_dir = config['competition']['data_dir']
     desc_file = os.path.join(data_dir, "public", "description.txt")
@@ -56,10 +61,10 @@ def setup_mlestar_agent(
     # Prepare the configuration
     cfg = prep_cfg(_cfg)
     task_desc = load_task_desc(cfg)
-    
+
     # Prepare the agent workspace
-    logger.info("Preparing agent workspace (copying and extracting files)...")
-    prep_agent_workspace(cfg)
+    with Status("Preparing agent workspace (copying and extracting files) ..."):
+        prep_agent_workspace(cfg)
     
     # Initialize the journal and get metric information
     journal = Journal()
