@@ -195,7 +195,7 @@ REMEMBER: You MUST create submission.csv in EVERY iteration. Without it, your sc
                                     # Parse patterns - looking for any accuracy/score output
                                     # Matches: "accuracy: 0.8058" or "score: 0.8058" or "accuracy  0.8058"
                                     patterns = [
-                                        r'(?:cross-?validation|cv|validation)\s+(?:accuracy|score)[:\s]+([0-9.]+)',
+                                        r'(?:cross-?validation|cross-?validated|cv|validation)\s+(?:accuracy|score)[:\s]+([0-9.]+)',
                                         r'accuracy[:\s]+([0-9.]+)',
                                         r'score[:\s]+([0-9.]+)',
                                     ]
