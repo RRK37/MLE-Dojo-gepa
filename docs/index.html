@@ -6,12 +6,16 @@
     <title>GEPA for MLE-Dojo - Genetic Pareto Optimization</title>
     <style>
         :root {
-            --primary: #2563eb;
-            --secondary: #3b82f6;
-            --dark: #1e293b;
-            --light: #f8fafc;
-            --accent: #10b981;
-            --text: #334155;
+            --primary: #00ff88;
+            --secondary: #00cc6f;
+            --dark: #0a0f1a;
+            --darker: #050810;
+            --card-bg: #111827;
+            --card-hover: #1a2332;
+            --light: #e5e7eb;
+            --accent: #00ff88;
+            --text: #d1d5db;
+            --text-secondary: #9ca3af;
         }
         
         * {
@@ -24,7 +28,7 @@
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
             line-height: 1.6;
             color: var(--text);
-            background: var(--light);
+            background: var(--dark);
         }
         
         .container {
@@ -34,24 +38,44 @@
         }
         
         header {
-            background: linear-gradient(135deg, var(--primary) 0%, var(--secondary) 100%);
+            background: linear-gradient(135deg, var(--darker) 0%, var(--dark) 100%);
             color: white;
             padding: 4rem 0 3rem;
             text-align: center;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            border-bottom: 2px solid rgba(0, 255, 136, 0.2);
+            position: relative;
+            overflow: hidden;
+        }
+        
+        header::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 100%;
+            background: radial-gradient(circle at 20% 50%, rgba(0, 255, 136, 0.1) 0%, transparent 50%),
+                        radial-gradient(circle at 80% 50%, rgba(0, 204, 111, 0.1) 0%, transparent 50%);
+            pointer-events: none;
         }
         
         header h1 {
             font-size: 3rem;
             margin-bottom: 1rem;
             font-weight: 700;
+            position: relative;
+            z-index: 1;
+            text-shadow: 0 0 40px rgba(0, 255, 136, 0.3);
         }
         
         header p {
             font-size: 1.3rem;
-            opacity: 0.95;
+            opacity: 0.9;
             max-width: 800px;
             margin: 0 auto;
+            position: relative;
+            z-index: 1;
+            color: var(--text);
         }
         
         .badges {
@@ -63,11 +87,14 @@
         }
         
         .badge {
-            background: rgba(255,255,255,0.2);
+            background: rgba(0, 255, 136, 0.1);
             padding: 0.5rem 1rem;
             border-radius: 20px;
             font-size: 0.9rem;
             backdrop-filter: blur(10px);
+            border: 1px solid rgba(0, 255, 136, 0.2);
+            position: relative;
+            z-index: 1;
         }
         
         .badge a {
@@ -83,10 +110,11 @@
         section h2 {
             font-size: 2.2rem;
             margin-bottom: 2rem;
-            color: var(--dark);
+            color: var(--light);
             border-bottom: 3px solid var(--primary);
             padding-bottom: 0.5rem;
             display: inline-block;
+            text-shadow: 0 0 30px rgba(0, 255, 136, 0.2);
         }
         
         section h3 {
@@ -103,16 +131,19 @@
         }
         
         .card {
-            background: white;
+            background: var(--card-bg);
             padding: 2rem;
             border-radius: 12px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-            transition: transform 0.3s, box-shadow 0.3s;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            transition: transform 0.3s, box-shadow 0.3s, background 0.3s, border 0.3s;
+            border: 1px solid rgba(255, 255, 255, 0.05);
         }
         
         .card:hover {
             transform: translateY(-5px);
-            box-shadow: 0 8px 16px rgba(0,0,0,0.15);
+            box-shadow: 0 8px 24px rgba(0, 255, 136, 0.15);
+            background: var(--card-hover);
+            border: 1px solid rgba(0, 255, 136, 0.3);
         }
         
         .card h3 {
@@ -131,22 +162,24 @@
         }
         
         code {
-            background: #f1f5f9;
+            background: rgba(0, 255, 136, 0.1);
             padding: 0.2rem 0.4rem;
             border-radius: 4px;
             font-family: 'Courier New', monospace;
             font-size: 0.9em;
-            color: #e11d48;
+            color: var(--primary);
+            border: 1px solid rgba(0, 255, 136, 0.2);
         }
         
         pre {
-            background: var(--dark);
+            background: var(--darker);
             color: #e2e8f0;
             padding: 1.5rem;
             border-radius: 8px;
             overflow-x: auto;
             margin: 1rem 0;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+            border: 1px solid rgba(0, 255, 136, 0.15);
         }
         
         pre code {
@@ -156,43 +189,50 @@
         }
         
         .highlight {
-            background: linear-gradient(135deg, var(--accent) 0%, #059669 100%);
-            color: white;
+            background: linear-gradient(135deg, rgba(0, 255, 136, 0.15) 0%, rgba(0, 204, 111, 0.15) 100%);
+            color: var(--light);
             padding: 2rem;
             border-radius: 12px;
             margin: 2rem 0;
+            border: 1px solid rgba(0, 255, 136, 0.3);
+            box-shadow: 0 4px 16px rgba(0, 255, 136, 0.1);
         }
         
         .highlight h3 {
-            color: white;
+            color: var(--primary);
             margin-top: 0;
         }
         
         .btn {
             display: inline-block;
             background: var(--primary);
-            color: white;
+            color: var(--dark);
             padding: 0.8rem 2rem;
             border-radius: 6px;
             text-decoration: none;
             font-weight: 600;
-            transition: background 0.3s;
+            transition: all 0.3s;
             margin: 0.5rem;
+            box-shadow: 0 0 20px rgba(0, 255, 136, 0.3);
         }
         
         .btn:hover {
             background: var(--secondary);
+            box-shadow: 0 0 30px rgba(0, 255, 136, 0.5);
+            transform: translateY(-2px);
         }
         
         .btn-outline {
             background: transparent;
             border: 2px solid var(--primary);
             color: var(--primary);
+            box-shadow: none;
         }
         
         .btn-outline:hover {
             background: var(--primary);
-            color: white;
+            color: var(--dark);
+            box-shadow: 0 0 20px rgba(0, 255, 136, 0.4);
         }
         
         ul {
@@ -205,11 +245,12 @@
         }
         
         footer {
-            background: var(--dark);
-            color: white;
+            background: var(--darker);
+            color: var(--text);
             text-align: center;
             padding: 2rem 0;
             margin-top: 4rem;
+            border-top: 1px solid rgba(0, 255, 136, 0.2);
         }
         
         footer a {
@@ -218,11 +259,12 @@
         }
         
         .architecture-diagram {
-            background: white;
+            background: var(--card-bg);
             padding: 2rem;
             border-radius: 12px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
             margin: 2rem 0;
+            border: 1px solid rgba(0, 255, 136, 0.2);
         }
         
         @media (max-width: 768px) {
@@ -253,7 +295,7 @@
         </div>
     </header>
 
-    <section id="overview">
+    <section id="overview" style="background: var(--dark);">
         <div class="container">
             <h2>What is GEPA?</h2>
             <p style="font-size: 1.1rem; margin-bottom: 2rem;">
@@ -282,7 +324,7 @@
         </div>
     </section>
 
-    <section id="integration" style="background: white;">
+    <section id="integration" style="background: var(--darker);">
         <div class="container">
             <h2>GEPA × MLE-Dojo Integration</h2>
             <p style="font-size: 1.1rem; margin-bottom: 2rem;">
@@ -333,7 +375,7 @@
         </div>
     </section>
 
-    <section id="usage">
+    <section id="usage" style="background: var(--dark);">
         <div class="container">
             <h2>Quick Start</h2>
             
@@ -386,7 +428,7 @@ pattern_analysis:
         </div>
     </section>
 
-    <section id="features" style="background: white;">
+    <section id="features" style="background: var(--darker);">
         <div class="container">
             <h2>Advanced Features</h2>
             
@@ -434,7 +476,7 @@ pattern_analysis:
         </div>
     </section>
 
-    <section id="results">
+    <section id="results" style="background: var(--dark);">
         <div class="container">
             <h2>Why GEPA for ML Engineering?</h2>
             
@@ -484,7 +526,7 @@ Pattern Analysis: Iteration 6 (Titanic Competition)
         </div>
     </section>
 
-    <section id="resources" style="background: white;">
+    <section id="resources" style="background: var(--darker);">
         <div class="container">
             <h2>Resources & Links</h2>
             
