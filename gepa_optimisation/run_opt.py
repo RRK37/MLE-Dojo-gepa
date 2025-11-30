@@ -66,7 +66,9 @@ def main():
     
     # Competition and environment settings
     competition_name = "titanic"  # Replace with your competition name
-    data_dir = "./data/prepared/titanic"  # Path to competition data
+    # Note: In remote environment, data is at app/MLE-Dojo-gepa/data/prepared/titanic/data/public
+    # The data_dir should point to the parent directory containing the data folder structure
+    data_dir = os.path.abspath("./data/prepared/titanic")  # Path to competition data
     output_dir = "./output"
     task_desc = "Predict survival on the Titanic. Optimize for accuracy."
 
