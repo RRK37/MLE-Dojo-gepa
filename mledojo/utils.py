@@ -112,7 +112,7 @@ def load_agent_config(agent_type: str) -> Dict[str, Any]:
     Load agent-specific configuration from the appropriate config file.
     
     Args:
-        agent_type: Type of agent (aide, mle, openai, dummy)
+        agent_type: Type of agent (aide, mle, openai, dummy, mlestar)
         
     Returns:
         Agent configuration dictionary
@@ -141,6 +141,11 @@ def load_agent_config(agent_type: str) -> Dict[str, Any]:
             './mledojo/agent/dummy/config.yaml',
             os.path.join(base_dir, 'agent/dummy/config.yaml'),
             './submodules/mle-dojo/mledojo/agent/dummy/config.yaml'
+        ],
+        'mlestar': [
+            './mledojo/agent/mlestar/config.yaml',
+            os.path.join(base_dir, 'agent/mlestar/config.yaml'),
+            './submodules/mle-dojo/mledojo/agent/mlestar/config.yaml'
         ]
     }
     
