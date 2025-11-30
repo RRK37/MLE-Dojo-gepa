@@ -164,22 +164,60 @@ class MLESTARAgent(AIDEAgent):
     
     def query_llm(self, system_message: str | dict | None, user_message: Optional[str] = None) -> Tuple[str, float]:
         """Query the LLM model."""
-        # Compile prompt to markdown if it's a dict, otherwise use as-is (might already be compiled)
+        # Compile prompt to markdown if it's a dict, otherwise use as-is
         if isinstance(system_message, dict):
             system_message = compile_prompt_to_md(system_message)
+            # Ensure compilation produced content
+            if not system_message or not system_message.strip():
+                logger.error(f"Compiled system_message from dict is empty. Dict keys: {list(system_message.keys()) if isinstance(system_message, dict) else 'N/A'}")
+                # Try to create a fallback message
+                system_message = "Please provide a solution for this machine learning task."
         elif system_message:
-            # If it's already a string, ensure it's properly formatted
-            system_message = system_message.strip() + "\n" if system_message.strip() else None
+            system_message = compile_prompt_to_md(system_message) if system_message else None
+            if system_message and not system_message.strip():
+                logger.warning("Compiled system_message string is empty after strip, using fallback")
+                system_message = "Please provide a solution for this machine learning task."
         else:
             system_message = None
             
         user_message = compile_prompt_to_md(user_message) if user_message else None
+        if user_message and not user_message.strip():
+            user_message = None
+        
+        # If no user message provided but we have a system message, treat the system message as user message
+        # This is common in AIDE where the entire prompt is passed as system_message
+        if system_message and not user_message:
+            user_message = system_message
+            system_message = None
+        
+        # Final safety check - ensure we have at least one non-empty message
+        if not user_message and not system_message:
+            logger.error("Both system_message and user_message are None/empty after compilation")
+            # Create a fallback user message
+            user_message = "Please provide a solution for this machine learning task."
+        
         messages = opt_messages_to_list(system_message, user_message)
         
-        # Ensure we have at least one message
-        if not messages:
-            logger.error("No messages to send to LLM - both system_message and user_message are empty")
-            return "", 0.0
+        # Check if messages conform to OpenAI standard message format
+        if not messages or not isinstance(messages, list) or len(messages) == 0:
+            logger.error(f"No messages to send to LLM. system_message type: {type(system_message)}, user_message type: {type(user_message)}")
+            logger.error(f"system_message content (first 200 chars): {str(system_message)[:200] if system_message else 'None'}")
+            logger.error(f"user_message content (first 200 chars): {str(user_message)[:200] if user_message else 'None'}")
+            # Create a fallback message
+            messages = [{"role": "user", "content": "Please provide a solution for this machine learning task."}]
+            
+        for msg in messages:
+            if not isinstance(msg, dict) or 'role' not in msg or 'content' not in msg:
+                logger.error(f"Invalid message format: {msg}")
+                return "", 0.0
+            
+            if msg['role'] not in ['system', 'user', 'assistant']:
+                logger.error(f"Invalid role: {msg['role']}")
+                return "", 0.0
+            
+            if not isinstance(msg['content'], str) or not msg['content'].strip():
+                logger.error(f"Message content is empty or not a string: {type(msg['content'])}")
+                return "", 0.0
         
         # chat_completion returns (response_text, cost) tuple
         result = self.model_client.chat_completion(messages, self.model_settings)
@@ -394,6 +432,11 @@ class MLESTARAgent(AIDEAgent):
         }
     
     def _draft(self) -> Node:
+        # Ensure task_desc is valid
+        if not self.task_desc:
+            logger.error("task_desc is empty or None")
+            self.task_desc = "Machine learning competition task"
+        
         prompt: Any = {
             "Introduction": (
                 "You are a Kaggle grandmaster attending a competition. "
