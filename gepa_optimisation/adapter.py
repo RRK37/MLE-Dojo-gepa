@@ -192,19 +192,18 @@ REMEMBER: You MUST create submission.csv in EVERY iteration. Without it, your sc
                                 stdout_text = exec_result.get("stdout", "")
                                 
                                 if stdout_text:
-                                    # Parse patterns - updated to match actual output format
+                                    # Parse patterns - looking for any accuracy/score output
+                                    # Matches: "accuracy: 0.8058" or "score: 0.8058" or "accuracy  0.8058"
                                     patterns = [
-                                        r'(\d+)-fold\s+cross-validation\s+accuracy[:\s]+([0-9.]+)',
-                                        r'Cross-validation\s+accuracy[:\s]+([0-9.]+)',
-                                        r'CV\s+accuracy[:\s]+([0-9.]+)',
+                                        r'(?:cross-?validation|cv|validation)\s+(?:accuracy|score)[:\s]+([0-9.]+)',
                                         r'accuracy[:\s]+([0-9.]+)',
+                                        r'score[:\s]+([0-9.]+)',
                                     ]
                                     for pattern in patterns:
                                         match = re.search(pattern, stdout_text, re.IGNORECASE)
                                         if match:
-                                            # Get the last group (the score)
-                                            cv_score = float(match.group(match.lastindex))
-                                            print(f"[Adapter] Extracted CV score {cv_score} using pattern: {pattern}")
+                                            cv_score = float(match.group(1))
+                                            print(f"[Adapter] Extracted CV score {cv_score} from stdout using pattern: {pattern}")
                                             break
                                 if cv_score > 0:
                                     break
