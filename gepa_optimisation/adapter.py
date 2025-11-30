@@ -125,6 +125,11 @@ class MLEDojoGEPAAdapter(GEPAAdapter):
                 feedback_str = str(obs.get("feedback", obs))
                 episode_trace.append(f"Execution Output:\n{feedback_str[:500]}...")
                 
+                # Debug: Print full obs structure to understand what keys exist
+                print(f"[Adapter] Step {steps} obs keys: {list(obs.keys()) if isinstance(obs, dict) else 'not a dict'}")
+                print(f"[Adapter] Step {steps} obs: {str(obs)[:500]}")
+                print(f"[Adapter] Step {steps} reward: {reward}, info: {info}")
+                
                 # Determine success based on execution status in observation
                 # MLE-Dojo uses "execution_status" key, and "success" (lowercase) as the value
                 status_str = obs.get("execution_status", obs.get("status", ""))
