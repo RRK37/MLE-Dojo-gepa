@@ -174,7 +174,25 @@ def main():
     )
 
     # --- E. Configure Initial Prompt ---
-    initial_prompt = "You are a Kaggle Grandmaster. Focus on improvement in cross-validation metrics and engineering and robust validation."
+    # More aggressive initial prompt that encourages experimentation
+    # GEPA will build upon this baseline and make mutations
+    initial_prompt = """You are a Kaggle Grandmaster focused on maximizing competition performance through aggressive experimentation.
+
+CORE STRATEGY:
+- Prioritize techniques that demonstrably improve cross-validation scores
+- Experiment with multiple modeling approaches (ensemble methods, advanced algorithms)
+- Engineer features aggressively - create interaction terms, polynomial features, domain-specific transformations
+- Use robust validation strategies (stratified k-fold, time-based splits if relevant)
+- Optimize hyperparameters systematically
+- Always generate valid submission.csv files
+
+IMPLEMENTATION FOCUS:
+1. Start with baseline model and establish CV benchmark
+2. Iterate rapidly with different feature engineering approaches
+3. Test ensemble methods (stacking, blending, voting)
+4. Apply feature selection to reduce overfitting
+5. Validate every change with cross-validation before submission"""
+    
     seed_candidate = {'system_prompt': initial_prompt}
 
     # --- F. Run Optimization ---
@@ -184,21 +202,6 @@ def main():
     # We provide dummy items since the adapter handles episodes internally
     trainset = [{"episode": i} for i in range(1)]  # 1 episode per evaluation (reduced for quick testing)
     
-    # Aggressive optimization meta-prompt for GEPA's reflection LLM
-    # This instructs GEPA to always mutate the prompt aggressively
-    optimization_instruction = """You are an aggressive prompt optimizer. Your goal is to ALWAYS modify and improve the system prompt to maximize performance.
-
-CRITICAL RULES:
-1. NEVER keep the prompt unchanged - always make meaningful modifications
-2. Be bold and experimental with changes - try new strategies, techniques, and approaches
-3. Focus relentlessly on improving the competition metric (accuracy, RMSE, etc.)
-4. Add specific, actionable instructions that the agent can follow
-5. Learn from execution traces - if something didn't work, try a completely different approach
-6. Make substantial changes, not just minor tweaks
-7. Push the boundaries - suggest advanced techniques, algorithms, and strategies
-
-Your mutations should be aggressive, creative, and aimed at significant performance gains. Do not be conservative."""
-
     result = optimize(
         seed_candidate=seed_candidate,
         trainset=trainset,  # Provide dummy trainset items for GEPA's batch sampler
@@ -206,8 +209,7 @@ Your mutations should be aggressive, creative, and aimed at significant performa
         reflection_lm="gpt-4o",  # The LLM analyzing the traces
         candidate_selection_strategy="current_best",  # Select best performing candidate
         max_metric_calls=2,  # Minimal testing: 2 total evaluations (1 initial + 1 optimization step)
-        display_progress_bar=True,
-        optimization_instruction=optimization_instruction  # Aggressive meta-prompt for GEPA
+        display_progress_bar=True
     )
 
     # --- G. Report Results ---
