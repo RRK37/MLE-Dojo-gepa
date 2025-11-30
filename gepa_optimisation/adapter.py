@@ -138,11 +138,13 @@ class MLEDojoGEPAAdapter(GEPAAdapter):
             
             env.close()
 
-        avg_score = total_score / num_episodes
-
         # Return EvaluationBatch as expected by GEPA
+        # EvaluationBatch expects: outputs (list of rollout outputs), scores (list of floats), trajectories (optional)
+        scores = [rollout["score"] for rollout in rollout_outputs]
+        trajectories = full_traces if capture_traces else None
+        
         return EvaluationBatch(
-            rollout_outputs=rollout_outputs,
-            aggregated_score=avg_score,
-            traces=full_traces if capture_traces else None
+            outputs=rollout_outputs,
+            scores=scores,
+            trajectories=trajectories
         )
