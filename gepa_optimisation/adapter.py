@@ -125,20 +125,12 @@ class MLEDojoGEPAAdapter(GEPAAdapter):
                 feedback_str = str(obs.get("feedback", obs))
                 episode_trace.append(f"Execution Output:\n{feedback_str[:500]}...")
                 
-                # Debug: Print full obs structure to understand what keys exist
-                print(f"[Adapter] Step {steps} obs keys: {list(obs.keys()) if isinstance(obs, dict) else 'not a dict'}")
-                print(f"[Adapter] Step {steps} obs: {str(obs)[:500]}")
-                print(f"[Adapter] Step {steps} reward: {reward}, info: {info}")
+                # Determine success based on action_status in observation
+                # KaggleEnvironment returns obs with "action_status" key (see _build_observation in env.py)
+                status_str = obs.get("action_status", "")
+                is_success = (status_str == "SUCCESS" or reward > 0.0)
                 
-                # Determine success based on execution status in observation
-                # MLE-Dojo uses "execution_status" key, and "success" (lowercase) as the value
-                status_str = obs.get("execution_status", obs.get("status", ""))
-                is_success = (status_str.lower() == "success" or 
-                             status_str == "SUCCESS" or 
-                             (isinstance(obs, dict) and obs.get("execution_status") == "success") or
-                             reward > 0.0)  # If we got a positive reward, consider it success
-                
-                print(f"[Adapter] Step {steps}: status='{status_str}', reward={reward}, is_success={is_success}")
+                print(f"[Adapter] Step {steps}: action_status='{status_str}', reward={reward}, is_success={is_success}")
                 
                 # Convert Gym output to the dictionary format Agent.parse_exec_result expects
                 return {
