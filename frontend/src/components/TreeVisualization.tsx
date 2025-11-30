@@ -187,34 +187,22 @@ const TreeVisualization: React.FC<TreeVisualizationProps> = ({
     return newNodes;
   };
 
-  // Initialize tree with n top-level nodes
+  // Initialize tree with n parallel root nodes
   const initializeTree = useCallback((count: number) => {
     if (externalNodes) return;
 
-    const root: TreeNode = {
-      id: 'root',
-      x: 400,
-      y: 80,
-      level: 0,
-      parent: null,
-      isActive: true,
-      isNew: false,
-      code: CODE_TEMPLATES.ensemble,
-      modelType: 'ensemble',
-      metrics: { accuracy: 0.85, loss: 0.32 }
-    };
+    const newNodes: TreeNode[] = [];
+    const modelTypes = ['catboost', 'lgbm', 'xgb', 'ensemble'];
 
-    const topLevelNodes: TreeNode[] = [];
-    const modelTypes = ['catboost', 'lgbm', 'xgb'];
-
+    // Create n parallel roots
     for (let i = 0; i < count; i++) {
       const modelType = modelTypes[i % modelTypes.length];
-      topLevelNodes.push({
-        id: `top-${i}`,
-        x: 0, // Will be calculated
-        y: 200,
-        level: 1,
-        parent: 'root',
+      newNodes.push({
+        id: `root-${i}`,
+        x: 0, // Layout will handle this
+        y: 80,
+        level: 0,
+        parent: null, // No parent = root
         isActive: true,
         isNew: false,
         code: CODE_TEMPLATES[modelType as keyof typeof CODE_TEMPLATES],
@@ -226,17 +214,17 @@ const TreeVisualization: React.FC<TreeVisualizationProps> = ({
       });
     }
 
-    const newConnections: Connection[] = topLevelNodes.map((node) => ({
-      from: 'root',
-      to: node.id,
-    }));
+    // No initial connections between roots
+    const newConnections: Connection[] = [];
 
-    const allNodes = [root, ...topLevelNodes];
-    const layoutNodes = recalculateLayout(allNodes, newConnections);
+    const layoutNodes = recalculateLayout(newNodes, newConnections);
 
     setInternalNodes(layoutNodes);
     setInternalConnections(newConnections);
-    setSelectedNode(root);
+    // Select the first root
+    if (layoutNodes.length > 0) {
+      setSelectedNode(layoutNodes[0]);
+    }
   }, [externalNodes]);
 
   // Initialize on mount and start simulation
