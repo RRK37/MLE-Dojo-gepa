@@ -13,7 +13,7 @@ import os
 import logging
 from typing import Dict, Any, Tuple
 
-from mledojo.agent.mlestar.agent import MLESTARAgent
+from mledojo.agent.mlestar.agent import MLESTARAgent, MLEStarConfig
 from mledojo.agent.aide.journal import Journal
 from mledojo.agent.aide.utils.config import (
     _load_cfg,
@@ -58,12 +58,6 @@ def setup_mlestar_agent(
     _cfg.log_dir = os.path.join(config['output_dir'], "logs")
     _cfg.workspace_dir = config['output_dir']
     
-    # Apply MLE-STAR specific config if provided
-    mlestar_config = config.get('mlestar', {})
-    search_iterations = mlestar_config.get('search_iterations', 3)
-    refinement_iterations = mlestar_config.get('refinement_iterations', 5)
-    perplexity_api_key = mlestar_config.get('perplexity_api_key') or os.environ.get('PERPLEXITY_API_KEY')
-    
     # Prepare the configuration
     cfg = prep_cfg(_cfg)
     task_desc = load_task_desc(cfg)
@@ -77,6 +71,18 @@ def setup_mlestar_agent(
     metric_class = get_metric(config['competition']['name'])
     higher_is_better = metric_class().higher_is_better
     
+    # Create MLE-STAR specific config
+    mlestar_config_dict = config.get('mlestar', {})
+    mlestar_cfg = MLEStarConfig(
+        search_iterations=mlestar_config_dict.get('search_iterations', 3),
+        refinement_iterations=mlestar_config_dict.get('refinement_iterations', 5),
+        perplexity_model=mlestar_config_dict.get('perplexity_model', 'llama-3.1-sonar-large-128k-online'),
+        enable_web_search=mlestar_config_dict.get('enable_web_search', True),
+        enable_ablation=mlestar_config_dict.get('enable_ablation', True),
+        enable_refinement=mlestar_config_dict.get('enable_refinement', True),
+        enable_ensemble=mlestar_config_dict.get('enable_ensemble', True),
+    )
+    
     # Create the MLE-STAR agent
     agent = MLESTARAgent(
         task_desc=task_desc,
@@ -85,12 +91,10 @@ def setup_mlestar_agent(
         higher_is_better=higher_is_better,
         data_dir=os.path.join(cfg.workspace_dir, "input"),
         output_dir=cfg.workspace_dir,
-        search_iterations=search_iterations,
-        refinement_iterations=refinement_iterations,
-        perplexity_api_key=perplexity_api_key,
+        mlestar_cfg=mlestar_cfg,
     )
     
     logger.info(f"MLE-STAR agent set up for competition: {config['competition']['name']}")
-    logger.info(f"Search iterations: {search_iterations}, Refinement iterations: {refinement_iterations}")
+    logger.info(f"Search iterations: {mlestar_cfg.search_iterations}, Refinement iterations: {mlestar_cfg.refinement_iterations}")
     return agent, journal, cfg
 

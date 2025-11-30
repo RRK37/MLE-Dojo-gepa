@@ -22,6 +22,10 @@ class PerplexityClient:
         if not self.api_key:
             raise ValueError("Perplexity API key must be provided or set as PERPLEXITY_API_KEY environment variable")
         
+        # Basic validation of API key format
+        if not self.api_key.startswith('pplx-'):
+            logger.warning("Perplexity API key should typically start with 'pplx-'. Please verify your API key.")
+        
         self.base_url = "https://api.perplexity.ai/chat/completions"
         self.headers = {
             "Authorization": f"Bearer {self.api_key}",
@@ -29,6 +33,14 @@ class PerplexityClient:
         }
     
     def search(self, query: str, model: str = "llama-3.1-sonar-large-128k-online") -> Dict[str, Any]:
+        """
+        Perform a web search using Perplexity API.
+        
+        Note: Common model names:
+        - llama-3.1-sonar-large-128k-online (for web search)
+        - llama-3.1-sonar-small-128k-online
+        - sonar (deprecated, use sonar models)
+        """
         """
         Perform a web search using Perplexity API.
         
@@ -82,11 +94,22 @@ class PerplexityClient:
                 'raw_response': None
             }
         except requests.exceptions.HTTPError as e:
-            logger.error(f"Perplexity API HTTP error: {e.response.status_code if hasattr(e, 'response') else 'Unknown'}")
+            status_code = e.response.status_code if hasattr(e, 'response') and e.response else 'Unknown'
+            error_detail = ""
+            try:
+                if hasattr(e, 'response') and e.response:
+                    error_detail = e.response.text[:500]  # First 500 chars of error
+                    logger.error(f"Perplexity API HTTP error {status_code}: {error_detail}")
+            except:
+                pass
+            logger.error(f"Perplexity API HTTP error: {status_code}")
+            if not error_detail:
+                logger.error("Check your API key and request format. Perplexity API may have changed.")
             return {
-                'content': f"Error: HTTP {e.response.status_code if hasattr(e, 'response') else 'Unknown'}",
+                'content': f"Error: HTTP {status_code}",
                 'citations': [],
-                'raw_response': None
+                'raw_response': None,
+                'error': error_detail
             }
         except requests.exceptions.RequestException as e:
             logger.error(f"Perplexity API error: {e}")

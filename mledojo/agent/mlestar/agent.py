@@ -7,8 +7,10 @@ import random
 import humanize
 import json
 import re
+import os
+import hashlib
 from typing import Any, Callable, Dict, List, Optional, Tuple
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import tiktoken
 from mledojo.agent.aide.agent import Agent as AIDEAgent
@@ -26,7 +28,12 @@ from mledojo.agent.aide.utils.util import (
 )
 from mledojo.agent.aide.utils.metric import MetricValue, WorstMetricValue
 from mledojo.chat import ChatClient, ModelSettings
-from mledojo.agent.mlestar.perplexity_client import PerplexityClient
+
+try:
+    from openai import OpenAI
+except ImportError:
+    OpenAI = None
+    logging.warning("OpenAI package not available. Perplexity web search will be disabled.")
 
 logger = logging.getLogger("mlestar")
 
@@ -34,17 +41,15 @@ ExecCallbackType = Callable[[str], Dict]
 
 
 @dataclass
-class LLMConfig:
-    """Configuration for LLM API settings"""
-    model_mode: str
-    model_name: str
-    port: int = 8314
-    max_completion_tokens: int = 8192
-    max_prompt_tokens: int = 30000
-    api_idx: int = -1
-    api_key: str = None
-    temperature: float = 0.0
-    top_p: float = 1.0
+class MLEStarConfig:
+    """Configuration for MLE-STAR specific settings"""
+    search_iterations: int = 3
+    refinement_iterations: int = 5
+    perplexity_model: str = "llama-3.1-sonar-large-128k-online"
+    enable_web_search: bool = True
+    enable_ablation: bool = True
+    enable_refinement: bool = True
+    enable_ensemble: bool = True
 
 
 class MLESTARAgent(AIDEAgent):
@@ -64,9 +69,7 @@ class MLESTARAgent(AIDEAgent):
         higher_is_better: bool,
         data_dir: str,
         output_dir: str,
-        search_iterations: int = 3,
-        refinement_iterations: int = 5,
-        perplexity_api_key: Optional[str] = None,
+        mlestar_cfg: Optional[MLEStarConfig] = None,
     ):
         """
         Initialize MLE-STAR Agent.
@@ -78,62 +81,534 @@ class MLESTARAgent(AIDEAgent):
             higher_is_better: Whether higher scores are better
             data_dir: Data directory path
             output_dir: Output directory path
-            search_iterations: Number of web search iterations
-            refinement_iterations: Number of refinement cycles
-            perplexity_api_key: Perplexity API key (optional, can use env var)
+            mlestar_cfg: MLE-STAR specific configuration
         """
-        # Initialize parent AIDE agent
-        super().__init__(task_desc, cfg, journal, higher_is_better, data_dir, output_dir)
+        self.task_desc = task_desc
+        self.cfg = cfg
+        self.acfg = cfg.agent
+        self.journal = journal
+        self.higher_is_better = higher_is_better
+        self.data_preview: Optional[str] = None
+        self.data_dir = data_dir
+        self.output_dir = output_dir
+        self.mlestar_cfg = mlestar_cfg or MLEStarConfig()
         
-        # MLE-STAR specific configuration
-        self.search_iterations = search_iterations
-        self.refinement_iterations = refinement_iterations
+        # State tracking
+        self.total_cost = 0.0
+        self.cost_history = []
+        self.conversation_history = []
         
-        # Initialize Perplexity client
-        try:
-            self.perplexity_client = PerplexityClient(api_key=perplexity_api_key)
-            self.perplexity_enabled = True
-        except Exception as e:
-            logger.warning(f"Perplexity not available: {e}. Web search will be disabled.")
-            self.perplexity_client = None
-            self.perplexity_enabled = False
-        
-        # MLE-STAR state tracking
-        self.retrieved_models: List[Dict[str, str]] = []
-        self.initial_solutions: List[Node] = []
-        self.ablation_results: List[Dict] = []
+        # MLE-STAR specific state
+        self.retrieved_models: List[Dict] = []
+        self.initial_solutions: List[Tuple[str, float]] = []  # (code, score)
+        self.best_solution: Optional[str] = None
+        self.best_score: float = -float('inf') if higher_is_better else float('inf')
+        self.ablation_history: List[Dict] = []
         self.refined_code_blocks: List[Dict] = []
-        self.ensemble_plans: List[Dict] = []
+        self.refinement_plans: List[Tuple[str, float]] = []  # (plan, score)
+        self.ensemble_solutions: List[str] = []
+        self.ensemble_plans: List[Tuple[str, float]] = []
+        
+        # Tracking for graphs and errors
+        self.reward_history: List[Dict] = []  # [{"timestep": int, "reward": float, "phase": str, "iteration": int, "error": Optional[str]}]
+        self.error_history: List[Dict] = []  # [{"timestep": int, "phase": str, "error": str, "traceback": str}]
+        self.timestep = 0
+        
+        # Bug history to avoid loops (like AIDE journal)
+        self.bug_history: List[Dict] = []  # [{"code_hash": str, "error": str, "attempt": int, "fix_attempted": str, "code_snippet": str}]
+        
+        # LLM settings
+        self.llm_config = self.acfg.code
+        self.tokenizer = tiktoken.encoding_for_model('gpt-4')
+        self.total_tokens = 0
+        
+        # Initialize model client
+        self.model_client = ChatClient(
+            model_name=self.llm_config.model_name,
+            model_category=self.llm_config.model_mode,
+            api_idx=self.llm_config.api_idx,
+            port=self.llm_config.port,
+            api_key=self.llm_config.api_key
+        )
+        self.model_settings = ModelSettings(
+            max_completion_tokens=self.llm_config.max_completion_tokens,
+            temperature=self.llm_config.temperature,
+            top_p=self.llm_config.top_p
+        )
+        
+        # Initialize web search client
+        self._init_web_client()
+        
+        # Phase tracking
         self.current_phase = "search"  # search, foundation, refinement, ensemble, validation
+    
+    def _init_web_client(self):
+        """Initialize web search client (Perplexity)."""
+        self.web_client = None
+        # Support both PPLX_API_KEY (Alxandria) and PERPLEXITY_API_KEY (MLE-STAR)
+        perplexity_key = os.getenv('PPLX_API_KEY') or os.getenv('PERPLEXITY_API_KEY')
+        if perplexity_key and OpenAI:
+            try:
+                self.web_client = OpenAI(
+                    api_key=perplexity_key,
+                    base_url="https://api.perplexity.ai"
+                )
+                logger.info("Initialized Perplexity web client")
+            except Exception as e:
+                logger.error(f"Failed to initialize Perplexity client: {str(e)}")
+        else:
+            if not OpenAI:
+                logger.warning("OpenAI package not available. Web search disabled.")
+            else:
+                logger.warning("Perplexity API key not found. Web search disabled.")
+    
+    def query_llm(self, system_message: str, user_message: Optional[str] = None) -> Tuple[str, float]:
+        """Query the LLM model."""
+        system_message = compile_prompt_to_md(system_message) if system_message else None
+        user_message = compile_prompt_to_md(user_message) if user_message else None
+        messages = opt_messages_to_list(system_message, user_message)
+        
+        # chat_completion returns (response_text, cost) tuple
+        result = self.model_client.chat_completion(messages, self.model_settings)
+        
+        # Safely unpack the tuple
+        if isinstance(result, tuple) and len(result) >= 2:
+            response, cost = result[0], result[1]
+        elif isinstance(result, tuple) and len(result) == 1:
+            response, cost = result[0], 0.0
+        else:
+            logger.error(f"chat_completion returned unexpected type: {type(result)}, value: {result}")
+            response = str(result) if result else ""
+            cost = 0.0
+        
+        self.total_cost += cost
+        
+        # Ensure response is a string (handle nested tuples and edge cases)
+        if isinstance(response, tuple):
+            logger.debug(f"query_llm: response is nested tuple, extracting first element")
+            response = response[0] if len(response) > 0 else ""
+        
+        if not isinstance(response, str):
+            # Only log as warning if it's unexpected (not None)
+            if response is not None:
+                logger.debug(f"query_llm: converting non-string response {type(response)} to string")
+            response = str(response) if response else ""
+        
+        return response, cost
+    
+    def _safe_query_llm(self, system_message: str, user_message: Optional[str] = None) -> str:
+        """Safely query LLM and return just the response string."""
+        result = self.query_llm(system_message, user_message)
+        if isinstance(result, tuple):
+            response, _ = result
+        else:
+            logger.warning(f"_safe_query_llm: query_llm returned non-tuple: {type(result)}")
+            response = str(result) if result else ""
+        
+        # Ensure response is a string
+        if not isinstance(response, str):
+            logger.warning(f"_safe_query_llm: response is not a string: {type(response)}")
+            response = str(response) if response else ""
+        
+        return response
+    
+    def search_web(self, query: str) -> str:
+        """Search web using Perplexity API (synchronous for Jupyter compatibility)."""
+        if not self.web_client:
+            logger.warning("Web search not available, returning empty result")
+            return ""
+        
+        try:
+            # Use synchronous call instead of asyncio for Jupyter compatibility
+            perplexity_model = self.mlestar_cfg.perplexity_model
+            response = self.web_client.chat.completions.create(
+                model=perplexity_model,
+                messages=[
+                    {"role": "system", "content": "You are a helpful assistant that performs web searches."},
+                    {"role": "user", "content": query}
+                ],
+                max_tokens=2000,
+                temperature=0.7,
+            )
+            if response and response.choices:
+                return response.choices[0].message.content or ""
+        except Exception as e:
+            logger.error(f"Web search failed: {str(e)}")
+        return ""
+    
+    def plan_and_code_query(self, prompt, retries=3) -> tuple[str, str, str]:
+        """Generate a natural language plan + code in the same LLM call and split them apart."""
+        completion_text = None
+        for _ in range(retries):
+            response, cost = self.query_llm(
+                system_message=prompt,
+                user_message=None,
+            )
+            self.total_cost += cost
+            self.cost_history.append({"action": "plan_and_code_query", "cost": cost})
+            self.conversation_history.append({"role": "assistant", "content": response})
+
+            code = extract_code(response)
+            nl_text = extract_text_up_to_code(response)
+
+            if code and nl_text:
+                # merge all code blocks into a single string
+                return nl_text, code, response
+
+            print("Plan + code extraction failed, retrying...")
+        print("Final plan + code extraction attempt failed, giving up...")
+        return "","", response if completion_text is None else completion_text  # type: ignore
+    
+    def search_policy(self) -> Node | None:
+        """Select a node to work on (or None to draft a new node)."""
+        search_cfg = self.acfg.search
+
+        # initial drafting
+        if len(self.journal.draft_nodes) < search_cfg.num_drafts:
+            logger.debug("[search policy] drafting new node (not enough drafts)")
+            return None
+
+        # debugging
+        if random.random() < search_cfg.debug_prob:
+            # nodes that are buggy + leaf nodes + debug depth < max debug depth
+            debuggable_nodes = [
+                n
+                for n in self.journal.buggy_nodes
+                if (n.is_leaf and n.debug_depth <= search_cfg.max_debug_depth)
+            ]
+            if debuggable_nodes:
+                logger.debug("[search policy] debugging")
+                return random.choice(debuggable_nodes)
+            logger.debug("[search policy] not debugging by chance")
+
+        # back to drafting if no nodes to improve
+        good_nodes = self.journal.good_nodes
+        if not good_nodes:
+            logger.debug("[search policy] drafting new node (no good nodes)")
+            return None
+
+        # greedy
+        greedy_node = self.journal.get_best_node()
+        logger.debug("[search policy] greedy node selected")
+        return greedy_node
+    
+    @property
+    def _prompt_environment(self):
+        pkgs = [
+            "numpy",
+            "pandas",
+            "scikit-learn",
+            "statsmodels",
+            "xgboost",
+            "lightGBM",
+            "torch",
+            "torchvision",
+            "torch-geometric",
+            "bayesian-optimization",
+            "timm",
+        ]
+        random.shuffle(pkgs)
+        pkg_str = ", ".join([f"`{p}`" for p in pkgs])
+
+        env_prompt = {
+            "Installed Packages": f"Your solution can use any relevant machine learning packages such as: {pkg_str}. Feel free to use any other packages too (all packages are already installed!). For neural networks, use PyTorch rather than TensorFlow. You have access to a GPU and can use CUDA for faster computations if needed."
+        }
+        return env_prompt
+
+    @property
+    def _prompt_impl_guideline(self):
+        impl_guideline = [
+            "The code should be a single-file python program that is self-contained and can be executed as-is.",
+            "No parts of the code should be skipped, don't terminate the script before finishing the code.",
+            "Your response should only contain a single code block.",
+            f"Be aware of the running time of the code, it should complete within {humanize.naturaldelta(self.cfg.exec.timeout)}.",
+            f'All the provided input data is stored in {self.data_dir} directory.',
+            f'**Save test predictions to `submission.csv` in {self.output_dir} directory as specified in the task description.** This file is critical for evaluation and scoring.',
+            'Your metric score (position score) depends on generating a valid `submission.csv` file at the correct location.',
+            'Your goal is to achieve the highest score, so ensure your code produces this file correctly.',
+            f'You can also use the "{self.output_dir}/working" directory to store any temporary files that your code needs to create.',
+        ]
+        if self.acfg.expose_prediction:
+            impl_guideline.append(
+                "The implementation should include a predict() function, "
+                "allowing users to seamlessly reuse the code to make predictions on new data. "
+                "The prediction function should be well-documented, especially the function signature."
+            )
+
+        if self.acfg.k_fold_validation > 1:
+            impl_guideline.append(
+                f"The evaluation should be based on {self.acfg.k_fold_validation}-fold cross-validation but only if that's an appropriate evaluation for the task at hand."
+            )
+
+        return {"Implementation guideline": impl_guideline}
+
+    @property
+    def _prompt_resp_fmt(self):
+        return {
+            "Response format": (
+                "Your response should be a brief outline/sketch of your proposed solution in natural language (3-5 sentences), "
+                "followed by a single markdown code block (wrapped in ```) which implements this solution and prints out the evaluation metric. "
+                "There should be no additional headings or text in your response. Just natural language text followed by a newline and then the markdown code block. "
+            )
+        }
+    
+    def _draft(self) -> Node:
+        prompt: Any = {
+            "Introduction": (
+                "You are a Kaggle grandmaster attending a competition. "
+                "In order to win this competition, you need to come up with an excellent and creative plan "
+                "for a solution and then implement this solution in Python. We will now provide a description of the task."
+            ),
+            "Task description": self.task_desc,
+            "Memory": self.journal.generate_summary(),
+            "Instructions": {},
+        }
+        prompt["Instructions"] |= self._prompt_resp_fmt
+        prompt["Instructions"] |= {
+            "Solution sketch guideline": [
+                "This first solution design should be relatively simple, without ensembling or hyper-parameter optimization.",
+                "Take the Memory section into consideration when proposing the design,"
+                " don't propose the same modelling solution but keep the evaluation the same.",
+                "The solution sketch should be 3-5 sentences.",
+                "Propose an evaluation metric according to the task description.",
+                "Don't suggest to do EDA.",
+                "The data is already prepared and available in the `./input` directory. There is no need to unzip any files.",
+                f"Your Python code should be able to generate a `submission.csv` file in the `{self.output_dir}` directory to get the metric score."
+            ],
+        }
+        prompt["Instructions"] |= self._prompt_impl_guideline
+        prompt["Instructions"] |= self._prompt_environment
+
+        self.conversation_history.append({
+            "Type": "Draft",
+            "Memory": prompt["Memory"],
+            "Instructions": prompt["Instructions"],
+        })
+
+        if self.acfg.data_preview:
+            prompt["Data Overview"] = self.data_preview
+        
+        plan, code, assistant = self.plan_and_code_query(prompt)
+        return Node(plan=plan, code=code, instruction_prompt=compile_prompt_to_md(prompt), node_type="draft", assistant=assistant)
+
+    def _improve(self, parent_node: Node) -> Node:
+        prompt: Any = {
+            "Introduction": (
+                "You are a Kaggle grandmaster attending a competition. You are provided with a previously developed "
+                "solution below and should improve it in order to further increase the (test time) performance, i.e. the position score provided by the competition. "
+                "For this you should first outline a brief plan in natural language for how the solution can be improved and "
+                "then implement this improvement in Python based on the provided previous solution. "
+            ),
+            "Task description": self.task_desc,
+            "Memory": self.journal.generate_summary(),
+            "Instructions": {},
+        }
+        prompt["Previous solution"] = {
+            "Code": wrap_code(parent_node.code),
+        }
+
+        prompt["Instructions"] |= self._prompt_resp_fmt
+        prompt["Instructions"] |= {
+            "Solution improvement sketch guideline": [
+                "The solution sketch should be a brief natural language description of how the previous solution can be improved.",
+                "You should be very specific and should only propose a single actionable improvement.",
+                "This improvement should be atomic so that we can experimentally evaluate the effect of the proposed change.",
+                "Take the Memory section into consideration when proposing the improvement.",
+                "The solution sketch should be 3-5 sentences.",
+                "Don't suggest to do EDA.",
+            ],
+        }
+        prompt["Instructions"] |= self._prompt_impl_guideline
+
+        self.conversation_history.append({
+            "Type": "Improve",
+            "Memory": prompt["Memory"],
+            "Instructions": prompt["Instructions"],
+        })
+
+        plan, code, assistant = self.plan_and_code_query(prompt)
+        return Node(
+            plan=plan,
+            code=code,
+            parent=parent_node,
+            instruction_prompt=compile_prompt_to_md(prompt),
+            node_type="improve",
+            assistant=assistant
+        )
+
+    def _debug(self, parent_node: Node) -> Node:
+        prompt: Any = {
+            "Introduction": (
+                "You are a Kaggle grandmaster attending a competition. "
+                "Your previous solution had a bug, so based on the information below, you should revise it in order to fix this bug. "
+                "Your response should be an implementation outline in natural language,"
+                " followed by a single markdown code block which implements the bugfix/solution."
+            ),
+            "Task description": self.task_desc,
+            "Previous (buggy) implementation": wrap_code(parent_node.code),
+            "Execution output": wrap_code(parent_node.feedback, lang=""),
+            "Instructions": {},
+        }
+        prompt["Instructions"] |= self._prompt_resp_fmt
+        prompt["Instructions"] |= {
+            "Bugfix improvement sketch guideline": [
+                "You should write a brief natural language description (3-5 sentences) of how the issue in the previous implementation can be fixed.",
+                "Don't suggest to do EDA.",
+            ],
+        }
+        prompt["Instructions"] |= self._prompt_impl_guideline
+
+        self.conversation_history.append({
+            "Type": "Debug",
+            "Instructions": prompt["Instructions"],
+        })
+
+        if self.acfg.data_preview:
+            prompt["Data Overview"] = self.data_preview
+
+        plan, code, assistant = self.plan_and_code_query(prompt)
+        return Node(plan=plan, code=code, parent=parent_node, instruction_prompt=compile_prompt_to_md(prompt), node_type="debug", assistant=assistant)
+
+    def update_data_preview(self):
+        self.data_preview = data_preview.generate(self.cfg.workspace_dir)
+    
+    def parse_exec_result(self, node: Node, exec_result: Dict):
+        logger.info(f"Agent is parsing execution results for node {node.id}")
+
+        eval_result = ExecutionResult(
+            status=exec_result["action_status"],
+            feedback=exec_result["feedback"],
+            raw_score=exec_result["current_raw_score"],
+            position_score=exec_result["current_position_score"],
+        )
+        node.absorb_exec_result(eval_result)
+        node.analysis = ""
+        node.is_buggy = eval_result.status == "FAILED"
+
+        if node.is_buggy:
+            node.metric = WorstMetricValue(value = 0.0)
+        else:
+            node.metric = MetricValue(eval_result.position_score, maximize=True)
         
     def _web_search_phase(self) -> List[Dict[str, str]]:
         """
         Phase 1: Web search for models (MLE-STAR Prompt 1).
         Uses Perplexity to search for effective models.
         """
-        if not self.perplexity_enabled:
-            logger.warning("Perplexity not available, skipping web search phase")
+        if not self.web_client or not self.mlestar_cfg.enable_web_search:
+            logger.warning("Web search not available, skipping web search phase. Will proceed with standard AIDE workflow.")
             return []
         
-        logger.info(f"Starting web search phase ({self.search_iterations} iterations)")
+        logger.info(f"Starting web search phase ({self.mlestar_cfg.search_iterations} iterations)")
         all_models = []
+        failed_searches = 0
         
-        for i in range(self.search_iterations):
-            logger.info(f"Web search iteration {i+1}/{self.search_iterations}")
-            models = self.perplexity_client.search_models(self.task_desc, num_models=5)
-            all_models.extend(models)
+        for i in range(self.mlestar_cfg.search_iterations):
+            logger.info(f"Web search iteration {i+1}/{self.mlestar_cfg.search_iterations}")
+            try:
+                # Use MLE-STAR Prompt 1
+                prompt = f"""# Competition
+{self.task_desc}
+
+# Your task
+- List 5 recent effective models and their example codes to win the above competition.
+
+# Requirement
+- The example code should be concise and simple.
+- You must provide an example code, i.e., do not just mention GitHubs or papers.
+
+Use this JSON schema:
+Model = {{'model_name': str, 'example_code': str}}
+Return: list[Model]"""
+                
+                search_result = self.search_web(prompt)
+                if search_result and not search_result.startswith('Error:'):
+                    models = self._parse_models_from_response(search_result, num_models=5)
+                    if models and len(models) > 0:
+                        all_models.extend(models)
+                    else:
+                        failed_searches += 1
+                        logger.warning(f"Search iteration {i+1} returned no valid models")
+                else:
+                    failed_searches += 1
+                    logger.warning(f"Search iteration {i+1} failed")
+            except Exception as e:
+                failed_searches += 1
+                logger.error(f"Search iteration {i+1} failed: {e}")
+        
+        if failed_searches == self.mlestar_cfg.search_iterations:
+            logger.warning("All web searches failed. Proceeding with standard AIDE workflow.")
+            return []
         
         # Deduplicate models by name
         seen_names = set()
         unique_models = []
         for model in all_models:
-            if model['model_name'] not in seen_names:
+            if model.get('model_name') and model['model_name'] not in seen_names:
                 seen_names.add(model['model_name'])
                 unique_models.append(model)
         
-        self.retrieved_models = unique_models[:10]  # Keep top 10
+        self.retrieved_models = unique_models[:10] if unique_models else []  # Keep top 10
         logger.info(f"Retrieved {len(self.retrieved_models)} unique models")
         return self.retrieved_models
+    
+    def _parse_models_from_response(self, content: str, num_models: int) -> List[Dict[str, str]]:
+        """Parse model information from search response."""
+        models = []
+        if not content:
+            logger.warning("Empty response from web search")
+            return self._create_placeholder_models(num_models)
+        
+        # Try to extract JSON from the response
+        json_match = re.search(r'\[.*?\]', content, re.DOTALL)
+        if json_match:
+            try:
+                parsed = json.loads(json_match.group())
+                if isinstance(parsed, list) and len(parsed) > 0:
+                    # Validate structure
+                    valid_models = []
+                    for item in parsed:
+                        if isinstance(item, dict) and 'model_name' in item and 'example_code' in item:
+                            valid_models.append({
+                                'model_name': str(item['model_name']),
+                                'example_code': str(item['example_code'])
+                            })
+                    if valid_models:
+                        return valid_models[:num_models]
+            except (json.JSONDecodeError, KeyError, TypeError) as e:
+                logger.debug(f"JSON parsing failed: {e}")
+        
+        # Fallback: try to extract model names and code blocks
+        code_blocks = re.findall(r'```(?:python)?\n(.*?)```', content, re.DOTALL)
+        model_names = re.findall(r'model[_\s]*name[:\s]*["\']?([^"\'\n]+)["\']?', content, re.IGNORECASE)
+        
+        # Also try to find model names in markdown lists or numbered lists
+        if not model_names:
+            model_names = re.findall(r'(?:^|\n)\s*(?:[-*]|\d+\.)\s*([A-Za-z][^:\n]+?)(?::|model|approach)', content, re.MULTILINE | re.IGNORECASE)
+        
+        for i, (name, code) in enumerate(zip(model_names[:num_models], code_blocks[:num_models])):
+            models.append({
+                'model_name': name.strip() if name else f"Model_{i+1}",
+                'example_code': code.strip() if code else f"# Code for {name or f'Model_{i+1}'}"
+            })
+        
+        # If we have code blocks but no names, use generic names
+        if code_blocks and not model_names:
+            for i, code in enumerate(code_blocks[:num_models]):
+                models.append({
+                    'model_name': f"Model_{i+1}",
+                    'example_code': code.strip()
+                })
+        
+        # If we still don't have models, create placeholder entries
+        return models[:num_models] if models else self._create_placeholder_models(num_models)
+    
+    def _create_placeholder_models(self, num_models: int) -> List[Dict[str, str]]:
+        """Create placeholder model entries when parsing fails."""
+        return [{
+            'model_name': f"Model_{i+1}",
+            'example_code': f"# Model {i+1} code not found in search results\n# Please implement based on task description"
+        } for i in range(num_models)]
     
     def _generate_initial_solution(self, model_info: Dict[str, str]) -> Optional[Node]:
         """
@@ -622,8 +1097,13 @@ class MLESTARAgent(AIDEAgent):
         # Phase 1: Web Search (only on first step)
         if self.current_phase == "search" and not self.retrieved_models:
             logger.info("Phase 1: Web Search")
-            self._web_search_phase()
-            self.current_phase = "foundation"
+            models = self._web_search_phase()
+            if not models and not self.web_client:
+                # If web search failed, skip to standard AIDE workflow
+                logger.info("Skipping MLE-STAR phases, using standard AIDE workflow")
+                self.current_phase = "improve"
+            else:
+                self.current_phase = "foundation"
         
         # Phase 2: Foundation Building (generate initial solutions)
         if self.current_phase == "foundation":
@@ -669,11 +1149,11 @@ class MLESTARAgent(AIDEAgent):
             if not best_node:
                 best_node = self.journal.get_best_node(only_good=False)
             
-            if best_node and len(self.ablation_results) < self.refinement_iterations:
-                logger.info(f"Phase 3: Targeted Refinement ({len(self.ablation_results)}/{self.refinement_iterations})")
+            if best_node and len(self.ablation_history) < self.mlestar_cfg.refinement_iterations:
+                logger.info(f"Phase 3: Targeted Refinement ({len(self.ablation_history)}/{self.mlestar_cfg.refinement_iterations})")
                 
                 # Ablation study
-                ablation_node = self._ablation_study(best_node, self.ablation_results)
+                ablation_node = self._ablation_study(best_node, self.ablation_history)
                 if ablation_node:
                     exec_result = exec_callback(ablation_node.code)
                     self.parse_exec_result(ablation_node, exec_result)
@@ -684,7 +1164,7 @@ class MLESTARAgent(AIDEAgent):
                         ablation_node.code,
                         str(exec_result.get('feedback', ''))
                     )
-                    self.ablation_results.append(ablation_summary)
+                    self.ablation_history.append(ablation_summary)
                     
                     # Extract refinement plan
                     refine_plan = self._extract_refinement_plan(best_node, ablation_summary, self.refined_code_blocks)
