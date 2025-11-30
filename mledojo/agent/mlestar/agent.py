@@ -100,7 +100,7 @@ class MLESTARAgent(AIDEAgent):
         
         # MLE-STAR specific state
         self.retrieved_models: List[Dict] = []
-        self.initial_solutions: List[Tuple[str, float]] = []  # (code, score)
+        self.initial_solutions: List[Node] = []  # List of Node objects
         self.best_solution: Optional[str] = None
         self.best_score: float = -float('inf') if higher_is_better else float('inf')
         self.ablation_history: List[Dict] = []
@@ -238,26 +238,53 @@ class MLESTARAgent(AIDEAgent):
     
     def plan_and_code_query(self, prompt, retries=3) -> tuple[str, str, str]:
         """Generate a natural language plan + code in the same LLM call and split them apart."""
-        completion_text = None
-        for _ in range(retries):
-            response, cost = self.query_llm(
-                system_message=prompt,
-                user_message=None,
-            )
-            self.total_cost += cost
-            self.cost_history.append({"action": "plan_and_code_query", "cost": cost})
-            self.conversation_history.append({"role": "assistant", "content": response})
+        response_text = ""
+        for attempt in range(retries):
+            try:
+                result = self.query_llm(
+                    system_message=prompt,
+                    user_message=None,
+                )
+                # query_llm returns (response, cost) tuple
+                if isinstance(result, tuple) and len(result) >= 2:
+                    response, cost = result[0], result[1]
+                elif isinstance(result, tuple) and len(result) == 1:
+                    response, cost = result[0], 0.0
+                else:
+                    response = str(result) if result else ""
+                    cost = 0.0
+                
+                self.total_cost += cost
+                self.cost_history.append({"action": "plan_and_code_query", "cost": cost})
+                self.conversation_history.append({"role": "assistant", "content": response})
+                
+                # Ensure response is a string
+                if not isinstance(response, str):
+                    response = str(response) if response else ""
+                
+                response_text = response
+                code = extract_code(response)
+                nl_text = extract_text_up_to_code(response)
 
-            code = extract_code(response)
-            nl_text = extract_text_up_to_code(response)
+                if code and nl_text:
+                    # merge all code blocks into a single string
+                    return nl_text, code, response
+                elif code:
+                    # If we have code but no natural language, use empty string for plan
+                    return "", code, response
+                elif nl_text:
+                    # If we have text but no code, return it as plan
+                    return nl_text, "", response
 
-            if code and nl_text:
-                # merge all code blocks into a single string
-                return nl_text, code, response
-
-            print("Plan + code extraction failed, retrying...")
-        print("Final plan + code extraction attempt failed, giving up...")
-        return "","", response if completion_text is None else completion_text  # type: ignore
+                if attempt < retries - 1:
+                    logger.debug(f"Plan + code extraction failed, retrying... (attempt {attempt + 1}/{retries})")
+            except Exception as e:
+                logger.error(f"Error in plan_and_code_query attempt {attempt + 1}: {e}")
+                if attempt == retries - 1:
+                    break
+        
+        logger.warning("Final plan + code extraction attempt failed, giving up...")
+        return "", "", response_text
     
     def search_policy(self) -> Node | None:
         """Select a node to work on (or None to draft a new node)."""
@@ -1098,11 +1125,12 @@ Return: list[Model]"""
         if self.current_phase == "search" and not self.retrieved_models:
             logger.info("Phase 1: Web Search")
             models = self._web_search_phase()
-            if not models and not self.web_client:
-                # If web search failed, skip to standard AIDE workflow
-                logger.info("Skipping MLE-STAR phases, using standard AIDE workflow")
+            if not models:
+                # If web search failed or returned no models, skip to standard AIDE workflow
+                logger.info("Web search failed or returned no models. Skipping MLE-STAR phases, using standard AIDE workflow")
                 self.current_phase = "improve"
             else:
+                logger.info(f"Web search successful, retrieved {len(models)} models. Moving to foundation phase.")
                 self.current_phase = "foundation"
         
         # Phase 2: Foundation Building (generate initial solutions)
