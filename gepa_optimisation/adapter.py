@@ -137,6 +137,7 @@ REMEMBER: You MUST create submission.csv in EVERY iteration. Without it, your sc
                         obs, reward, terminated, truncated, info = result
                     elif len(result) == 2:
                         obs, reward_or_info = result
+            
                         # Check if second value is a dict (info) or float (reward)
                         if isinstance(reward_or_info, dict):
                             info = reward_or_info
@@ -185,28 +186,34 @@ REMEMBER: You MUST create submission.csv in EVERY iteration. Without it, your sc
                     import re
                     
                     # Method 1: Check feedback structure
-                    if "feedback" in obs and isinstance(obs["feedback"], dict):
-                        for feedback_key, feedback_data in obs["feedback"].items():
-                            if isinstance(feedback_data, dict) and "raw_results" in feedback_data:
-                                exec_result = feedback_data["raw_results"].get("execution", {})
-                                stdout_text = exec_result.get("stdout", "")
-                                
-                                if stdout_text:
-                                    # Parse patterns - looking for any accuracy/score output
-                                    # Matches: "accuracy: 0.8058" or "score: 0.8058" or "accuracy  0.8058"
-                                    patterns = [
-                                        r'(?:cross-?validation|cross-?validated|cv|validation)\s+(?:accuracy|score)[:\s]+([0-9.]+)',
-                                        r'accuracy[:\s]+([0-9.]+)',
-                                        r'score[:\s]+([0-9.]+)',
-                                    ]
-                                    for pattern in patterns:
-                                        match = re.search(pattern, stdout_text, re.IGNORECASE)
-                                        if match:
-                                            cv_score = float(match.group(1))
-                                            print(f"[Adapter] Extracted CV score {cv_score} from stdout using pattern: {pattern}")
-                                            break
-                                if cv_score > 0:
-                                    break
+                    print(f"[Adapter Debug] Obs keys: {obs.keys()}")
+                    if "feedback" in obs:
+                        print(f"[Adapter Debug] Feedback type: {type(obs['feedback'])}")
+                        if isinstance(obs["feedback"], dict):
+                            print(f"[Adapter Debug] Feedback keys: {obs['feedback'].keys()}")
+                            for feedback_key, feedback_data in obs["feedback"].items():
+                                print(f"[Adapter Debug] Checking feedback key: {feedback_key}")
+                                if isinstance(feedback_data, dict) and "raw_results" in feedback_data:
+                                    exec_result = feedback_data["raw_results"].get("execution", {})
+                                    stdout_text = exec_result.get("stdout", "")
+                                    print(f"[Adapter Debug] Stdout found (len={len(stdout_text)}): {stdout_text[:100]}...")
+                                    
+                                    if stdout_text:
+                                        # Parse patterns - looking for any accuracy/score output
+                                        # Matches: "accuracy: 0.8058" or "score: 0.8058" or "accuracy  0.8058"
+                                        patterns = [
+                                            r'(?:cross-?validation|cross-?validated|cv|validation)\s+(?:accuracy|score)[:\s]+([0-9.]+)',
+                                            r'accuracy[:\s]+([0-9.]+)',
+                                            r'score[:\s]+([0-9.]+)',
+                                        ]
+                                        for pattern in patterns:
+                                            match = re.search(pattern, stdout_text, re.IGNORECASE)
+                                            if match:
+                                                cv_score = float(match.group(1))
+                                                print(f"[Adapter] Extracted CV score {cv_score} from stdout using pattern: {pattern}")
+                                                break
+                                    if cv_score > 0:
+                                        break
                     
                     # Use CV score as reward if found
                     if cv_score > 0:
