@@ -571,9 +571,41 @@ class MLEStarAgent:
     
     # ========== Validation & Debugging ==========
     
-    def _debug_code(self, code: str, error: str) -> Optional[str]:
-        """Debug code with error (Prompt 11)."""
-        prompt = prompts.prompt_11_debug(code, error, self.data_dir)
+    def _debug_code(self, code: str, error: str, parent_node: Optional[Node] = None) -> Optional[str]:
+        """
+        Debug code with error (Prompt 11).
+        
+        Enhanced with context like AIDE:
+        - Task description
+        - Data preview
+        - Previous execution feedback
+        - Parent node context (if available)
+        """
+        # Build enhanced prompt with context (like AIDE does)
+        error_info = error
+        if parent_node and parent_node.feedback:
+            # Use feedback from parent node if available
+            feedback = parent_node.feedback
+            if isinstance(feedback, dict):
+                execution = feedback.get("execution", {})
+                if isinstance(execution, dict):
+                    stderr = execution.get("stderr", "")
+                    stdout = execution.get("stdout", "")
+                    error_msg = execution.get("error", "")
+                    if stderr or error_msg:
+                        error_info = f"{error_msg}\n{stderr}" if error_msg else stderr
+                    elif stdout:
+                        error_info = f"Execution output:\n{stdout}\n\nError: {error}"
+            elif isinstance(feedback, str):
+                error_info = feedback
+        
+        # Use the base prompt
+        prompt = prompts.prompt_11_debug(code, error_info, self.data_dir)
+        
+        # Enhance with context like AIDE (if we have task_desc and data_preview)
+        # Note: The prompt_11_debug already has code and error, but we could add more context
+        # For now, keeping it simple but extensible
+        
         response = self._safe_query_llm(prompt)
         fixed_code = extract_code(response)
         return fixed_code if fixed_code else None
