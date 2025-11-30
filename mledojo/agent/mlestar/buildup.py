@@ -1,7 +1,7 @@
 """
 Setup module for MLE-STAR Agent.
 
-This module provides functions to set up and configure the MLE-STAR Agent
+This module provides functions to set up and configure the MLE-STAR agent
 for Kaggle competitions. It handles loading configurations, preparing
 workspaces, and initializing the agent with appropriate parameters.
 
@@ -39,6 +39,8 @@ def setup_mlestar_agent(
     
     Args:
         config: Configuration dictionary containing agent and competition settings
+        competition_name: Name of the Kaggle competition
+        output_dir: Directory where outputs will be stored
         
     Returns:
         Tuple containing:
