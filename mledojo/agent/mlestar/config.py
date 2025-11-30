@@ -21,6 +21,7 @@ class MLEStarConfig:
     
     # Web search
     perplexity_api_key: Optional[str] = field(default_factory=lambda: os.getenv('PERPLEXITY_API_KEY'))
+    perplexity_model: str = "sonar-pro"  # Valid Perplexity model for web search (matches Alxandria)
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert to dictionary."""
@@ -31,6 +32,7 @@ class MLEStarConfig:
             'ensemble_iterations': self.ensemble_iterations,
             'num_models_to_retrieve': self.num_models_to_retrieve,
             'subsample_size': self.subsample_size,
+            'perplexity_model': self.perplexity_model,
         }
     
     @classmethod

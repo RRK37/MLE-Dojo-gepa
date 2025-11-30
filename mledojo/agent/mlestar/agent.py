@@ -111,7 +111,8 @@ class MLEStarAgent:
     def _init_web_client(self):
         """Initialize web search client (Perplexity)."""
         self.web_client = None
-        perplexity_key = os.getenv('PERPLEXITY_API_KEY')
+        # Support both PPLX_API_KEY (Alxandria) and PERPLEXITY_API_KEY (MLE-STAR)
+        perplexity_key = os.getenv('PPLX_API_KEY') or os.getenv('PERPLEXITY_API_KEY')
         if perplexity_key:
             try:
                 self.web_client = OpenAI(
@@ -141,8 +142,9 @@ class MLEStarAgent:
         
         try:
             # Use synchronous call instead of asyncio for Jupyter compatibility
+            perplexity_model = self.mlestar_cfg.perplexity_model
             response = self.web_client.chat.completions.create(
-                model="sonar-medium-online",
+                model=perplexity_model,
                 messages=[
                     {"role": "system", "content": "You are a helpful assistant that performs web searches."},
                     {"role": "user", "content": query}
