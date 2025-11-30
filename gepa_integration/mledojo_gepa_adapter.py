@@ -302,7 +302,10 @@ class MLEDojoGEPAAdapter:
             
         config['env']['max_steps'] = comp_config.max_steps
         config['env']['execution_timeout'] = comp_config.execution_timeout
+        config['agent']['steps'] = comp_config.max_steps
         config['output_dir'] = comp_config.output_dir
+
+        
         
         return config
     

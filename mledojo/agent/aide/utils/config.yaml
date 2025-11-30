@@ -41,7 +41,7 @@ agent:
   # LLM settings for coding
   code:
     model_mode: claude
-    model_name: claude-3-5-sonnet
+    model_name: claude-3-5-haiku-20241022
     port: 8314  # Port for local model
     max_completion_tokens: 8192  # Maximum tokens for completion
     max_prompt_tokens: 30000 
