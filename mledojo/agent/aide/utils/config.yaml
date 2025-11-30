@@ -40,7 +40,7 @@ agent:
 
   # LLM settings for coding
   code:
-    model_mode: anthropic
+    model_mode: claude
     model_name: claude-3-5-sonnet
     port: 8314  # Port for local model
     max_completion_tokens: 8192  # Maximum tokens for completion
