@@ -78,6 +78,7 @@ class MLEDojoGEPAAdapter:
         self.base_config = base_config
         self.verbose = verbose
         self.run_counter = 0
+        # FIX: Initialize this attribute to None to satisfy GEPA checks
         self.propose_new_texts = None
         
     def evaluate(
@@ -133,7 +134,6 @@ class MLEDojoGEPAAdapter:
                         failure_patterns=[str(e)]
                     ))
         
-        # FIX: Return the specific object GEPA expects, not a dict
         return GEPAEvaluationResult(
             outputs=outputs,
             scores=scores,
@@ -154,7 +154,8 @@ class MLEDojoGEPAAdapter:
         config = self._prepare_config(comp_config)
         
         # Determine competition data path
-        comp_data_path = os.path.join(comp_config.data_dir, comp_config.name, "data")
+        # FIX: Ensure we point to the inner data folder: data/prepared/<comp>/data
+        comp_data_path = os.path.join(config['competition']['data_dir'], "data")
         
         # Get metric class
         try:
@@ -227,27 +228,30 @@ class MLEDojoGEPAAdapter:
     def _prepare_config(self, comp_config: CompetitionConfig) -> Dict[str, Any]:
         """Prepare configuration dict for AIDE agent"""
         config = self.base_config.copy()
-
-        comp_specific_dir = os.path.join(comp_config.data_dir, comp_config.name)
+        
+        # FIX: Construct the correct path including the competition name
+        # Structure: data/prepared/<comp_name>
+        comp_root_dir = os.path.join(comp_config.data_dir, comp_config.name)
         
         # Update with competition-specific settings
         config['competition']['name'] = comp_config.name
-        config['competition']['data_dir'] = comp_config.data_dir
-        config['env']['max_steps'] = comp_config.max_steps
-        config['env']['execution_timeout'] = comp_config.execution_timeout
-        config['output_dir'] = comp_config.output_dir
+        config['competition']['data_dir'] = comp_root_dir
         
-        # FIX: Dynamically set the description file path
-        # Otherwise it uses the hardcoded path from base config (e.g. Titanic)
-        desc_path = os.path.join(comp_config.data_dir, comp_config.name, "data", "public", "description.txt")
+        # FIX: Point strictly to the description file location you confirmed
+        # Structure: data/prepared/<comp_name>/data/public/description.txt
+        desc_path = os.path.join(comp_root_dir, "data", "public", "description.txt")
         
         if os.path.exists(desc_path):
             config['desc_file'] = desc_path
         else:
-            # Clear it so it doesn't default to the wrong competition
             config['desc_file'] = None
-            logger.warning(f"Description file not found at {desc_path}")
+            # Log exact path we tried so we can debug if it fails again
+            logger.error(f"Description file NOT FOUND at: {desc_path}")
             
+        config['env']['max_steps'] = comp_config.max_steps
+        config['env']['execution_timeout'] = comp_config.execution_timeout
+        config['output_dir'] = comp_config.output_dir
+        
         return config
     
     def _build_trajectory(
@@ -277,13 +281,12 @@ class MLEDojoGEPAAdapter:
     def make_reflective_dataset(
         self,
         candidate: Dict[str, str],
-        eval_batch: GEPAEvaluationResult, # Updated type hint
+        eval_batch: GEPAEvaluationResult,
         components_to_update: List[str],
     ) -> Mapping[str, Sequence[Mapping[str, Any]]]:
         """
         Build reflective dataset for GEPA's instruction proposer.
         """
-        # Access attributes directly now
         trajectories = eval_batch.trajectories
         scores = eval_batch.scores
         
