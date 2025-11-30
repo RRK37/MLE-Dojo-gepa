@@ -36,9 +36,47 @@ class MLEDojoGEPAAdapter(GEPAAdapter):
         Runs the agent against the environment using the candidate prompt.
         """
         # 1. Get the new prompt from GEPA (candidate is a dict, not an object)
-        system_prompt = candidate['system_prompt']
+        base_system_prompt = candidate['system_prompt']
         
-        print(f"\n[Adapter] Evaluating with system prompt: {system_prompt[:100]}...")
+        # 2. Enhance the prompt to ALWAYS create submission files
+        # This is critical for getting actual rewards from the environment
+        system_prompt = f"""{base_system_prompt}
+
+CRITICAL INSTRUCTIONS FOR EVERY CODE ITERATION:
+1. Load the training data and train your model
+2. Load the test data from the input directory
+3. Make predictions on the test set using your trained model  
+4. Create a submission DataFrame matching the format in sample_submission.csv
+5. Save to 'submission.csv' in the output directory (NOT the input directory)
+6. Your score depends ENTIRELY on creating this valid submission.csv file
+
+Code Template Structure:
+```python
+import pandas as pd
+# 1. Load and preprocess train data
+train = pd.read_csv('/path/to/train.csv')
+# ... feature engineering ...
+
+# 2. Train model
+model.fit(X_train, y_train)
+
+# 3. Load test data and preprocess identically
+test = pd.read_csv('/path/to/test.csv')
+# ... same feature engineering ...
+
+# 4. Make predictions
+predictions = model.predict(X_test)
+
+# 5. Create submission matching sample_submission.csv format
+submission = pd.DataFrame({{'PassengerId': test['PassengerId'], 'Survived': predictions}})
+
+# 6. Save to output directory
+submission.to_csv('submission.csv', index=False)  # This creates it in output_dir
+```
+
+REMEMBER: You MUST create submission.csv in EVERY iteration. Without it, your score is 0."""
+        
+        print(f"\n[Adapter] Evaluating with base prompt: {base_system_prompt[:80]}...")
         print(f"[Adapter] Batch size: {len(batch)}, Capture traces: {capture_traces}")
         
         # 2. Run Episodes (1 episode per batch item, or default to 1 if batch is empty)
