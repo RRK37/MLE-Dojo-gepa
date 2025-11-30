@@ -72,6 +72,15 @@ def main():
     data_dir = os.path.abspath(data_dir)
     output_dir = "./output"
     task_desc = "Predict survival on the Titanic. Optimize for accuracy."
+    
+    # Workaround: Titanic has gender_submission.csv but framework expects sample_submission.csv
+    import shutil
+    from pathlib import Path
+    sample_sub_path = Path(data_dir) / "public" / "sample_submission.csv"
+    gender_sub_path = Path(data_dir) / "public" / "gender_submission.csv"
+    if not sample_sub_path.exists() and gender_sub_path.exists():
+        print(f"Creating sample_submission.csv from gender_submission.csv...")
+        shutil.copy(gender_sub_path, sample_sub_path)
 
     # --- B. Define the Factory ---
     # This ensures every GEPA trial gets a fresh Agent with a clean Journal
