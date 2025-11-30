@@ -1,0 +1,70 @@
+# Configuration for MLE-STAR Agent
+
+# Output directory for agent results and logs
+output_dir: "output/"
+
+# Competition settings
+competition:
+  name: "dog-breed-identification"
+  data_dir: "data/prepared"
+
+# Environment settings
+env:
+  render_mode: "human"
+  gpu_device: 0
+  gpu_memory_limit: 32
+  execution_timeout: 10000  # seconds
+  score_mode: "position"
+  max_steps: 30  # Increased for MLE-STAR refinement and research steps
+
+# Agent Type
+agent_type: "mlestar"
+
+# MLE-STAR specific configuration
+agent:
+  # LLM Configuration - Claude models as primary
+  model_mode: "claude"  # Options: claude, openai, gemini
+  model_name: "claude-3-sonnet-20240229"  # Default to Claude Sonnet 4.5
+  reasoning_model: "claude-3-opus-20240229"  # For complex reasoning tasks
+  temperature: 0.3  # Lower for more deterministic outputs
+  top_p: 0.9
+  max_completion_tokens: 4096
+  max_prompt_tokens: 200000  # Claude 3.5 supports larger context
+  
+  # Research & Web Search
+  enable_web_search: true
+  search_provider: "perplexity"  # Options: perplexity, serper, none
+  max_search_results: 5
+  research_depth: "moderate"  # quick, moderate, deep
+  
+  # MLE-STAR Pipeline Configuration
+  max_initial_models: 3
+  max_refinement_steps: 5
+  ensemble_size: 3
+  ablation_study: true
+  enable_self_reflection: true
+  
+  # Search & Evaluation
+  search_iterations: 3
+  search_depth: 2
+  evaluation_metrics: ["accuracy", "f1", "inference_time"]
+  
+  # File paths
+  work_dir: "mle_star_workspace"
+  save_interval: 5  # Save state every N steps
+  
+  # Logging & Debugging
+  log_level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+  debug: false
+  log_ablation_studies: true
+  
+  # Advanced Settings
+  max_parallel_models: 2  # For parallel model training
+  cache_research: true  # Cache web search results
+  enable_code_analysis: true  # Enable static code analysis
+  
+# API Keys (should be set as environment variables)
+# - PERPLEXITY_API_KEY
+# - ANTHROPIC_API_KEY
+# - OPENAI_API_KEY
+# - SERPER_API_KEY

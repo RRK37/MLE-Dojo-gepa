@@ -1,0 +1,60 @@
+# MLE-STAR Agent Configuration
+
+# LLM Configuration
+llm:
+  model_name: "gpt-4"  # Default model to use
+  temperature: 0.7
+  max_tokens: 2048
+  top_p: 1.0
+  frequency_penalty: 0.0
+  presence_penalty: 0.0
+
+# Search Configuration
+search:
+  max_iterations: 10
+  max_refinements: 5
+  early_stopping_rounds: 3
+  validation_split: 0.2
+  random_state: 42
+
+# Kaggle Integration
+kaggle:
+  enabled: true
+  competition: null  # Set to competition ID when needed
+  kernel_type: "notebook"  # or "script"
+  gpu_enabled: false
+  internet_enabled: true
+
+# Logging
+logging:
+  level: "INFO"
+  file: "mle_star.log"
+  console: true
+
+# Performance
+performance:
+  n_jobs: -1  # Use all available cores
+  use_gpu: false
+  batch_size: 32
+  max_memory: 0.8  # Maximum fraction of memory to use (0.0 to 1.0)
+
+# Model Configuration
+model:
+  task_type: "auto"  # "classification", "regression", or "auto"
+  metric: "auto"  # Auto-detect based on task
+  feature_engineering: true
+  hyperparameter_tuning: true
+  ensemble: true
+  
+# Feature Engineering
+feature_engineering:
+  feature_scaling: true
+  feature_selection: true
+  feature_generation: true
+  feature_interaction: true
+  
+# Advanced
+advanced:
+  enable_cache: true
+  cache_dir: ".mle_star_cache"
+  verbose: 1  # 0: silent, 1: progress, 2: debug
