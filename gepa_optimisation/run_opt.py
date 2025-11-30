@@ -51,7 +51,7 @@ def main():
                 "max_completion_tokens": 8192,
                 "max_prompt_tokens": 30000,
                 "api_idx": 0,
-                "api_key": os.getenv("OPENAI_API_KEY"),
+                "api_key": os.getenv("ANTHROPIC_API_KEY"),
                 "temperature": 0.7,
                 "top_p": None
             },
