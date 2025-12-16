@@ -11,8 +11,12 @@
     <img src="https://img.shields.io/badge/Arxiv-2505.07782-000000.svg?style=flat-square&logo=arxiv&logoColor=%23FFD700&labelColor=000000" height="28">
   </a>
   &nbsp;&nbsp;&nbsp;
+  <a href="https://rrk37.github.io/MLE-Dojo-gepa/">
+    <img src="https://img.shields.io/badge/GEPA%20Integration-%20-000000.svg?style=flat-square&logo=Google-Chrome&logoColor=%2300ff88&labelColor=000000" height="28">
+  </a>
+  &nbsp;&nbsp;&nbsp;
   <a href="https://mle-dojo.github.io/MLE-Dojo-page/">
-    <img src="https://img.shields.io/badge/Project%20Website-%20-000000.svg?style=flat-square&logo=Google-Chrome&logoColor=%23FFD700&labelColor=000000" height="28">
+    <img src="https://img.shields.io/badge/Original%20Project-%20-000000.svg?style=flat-square&logo=Google-Chrome&logoColor=%23FFD700&labelColor=000000" height="28">
   </a>
   &nbsp;&nbsp;&nbsp;
   <a href="https://huggingface.co/spaces/MLE-Dojo/Leaderboard">
